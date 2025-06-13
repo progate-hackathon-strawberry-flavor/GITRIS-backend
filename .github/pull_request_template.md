@@ -7,6 +7,7 @@ xxxの改修をしました。
 ## レビュー希望日
 mm/dd (曜日) までにレビューお願いします！
 
+## 以下、Copilotに知っておいてほしいこと （消さないでね！）
 <!-- for GitHub Copilot review rule -->
 <!-- I want to review in Japanese. -->
 <!--
