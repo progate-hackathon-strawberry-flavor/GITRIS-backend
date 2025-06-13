@@ -8,8 +8,8 @@ xxxの改修をしました。
 mm/dd (曜日) までにレビューお願いします！
 
 ## 以下、Copilotに知っておいてほしいこと （消さないでね！）
-<!-- for GitHub Copilot review rule -->
 <!-- I want to review in Japanese. -->
+<!-- for GitHub Copilot review rule -->
 <!--
 レビューする際には、以下のprefix(接頭辞)をつけてください
 [must]  
