@@ -17,7 +17,7 @@ func AuthMiddleware(next http.Handler) http.Handler{
 		// 1. authorizationヘッダーからJWTを取得
 		authHeader := r.Header.Get("Authorization")
 		if authHeader ==""{
-			http.Error(w, "Authorization header is requred", http.StatusUnauthorized)
+			http.Error(w, "Authorization header is required", http.StatusUnauthorized)
 			return
 		}
 
