@@ -38,6 +38,6 @@ func GetDecksForUser(w http.ResponseWriter, r *http.Request) {
 
 	// 現時点では、簡易的なレスポンスを返します。
 	w.Header().Set("Content-Type", "text/plain") // Content-Type を設定
-	fmt.Fprintf(w, "やあ。ここはJWTトークン持っている人専用のAPIだよ。貴様、ログインしているな？", userID)
+	fmt.Fprintf(w, "やあ。ここはJWTトークン持っている人専用のAPIだよ。貴様、ログインしているな？ユーザーID: %s", userID)
 }
 
