@@ -42,7 +42,7 @@ func AuthMiddleware(next http.Handler) http.Handler{
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error){
 			// アルゴリズムがHMACであることを確認
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected igning method: %v", token.Header["alg"])
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			// Secret Keyを返す
 			return []byte(jwtSecret), nil
