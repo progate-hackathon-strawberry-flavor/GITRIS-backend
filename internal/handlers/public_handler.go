@@ -1,6 +1,6 @@
 package handlers
 
-import(
+import (
 	"net/http"
 	"log"
 	"fmt"
