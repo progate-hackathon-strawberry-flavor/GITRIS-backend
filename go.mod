@@ -3,6 +3,7 @@ module github.com/progate-hackathon-strawberry-flavor/GITRIS-backend
 go 1.24.1
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/google/go-github/v59 v59.0.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
