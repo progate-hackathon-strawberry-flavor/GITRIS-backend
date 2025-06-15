@@ -172,7 +172,7 @@ func (s *GitHubService) GetDailyContributions(username, githubToken string, star
 			errMsg += fmt.Sprintf("- %s\n", e.Message)
 		}
 		log.Printf("GitHubService Error: %s", errMsg)
-		return nil, fmt.Errorf(errMsg)
+		return nil, fmt.Errorf("%s",errMsg)
 	}
 
 	// データが取得できたか確認
