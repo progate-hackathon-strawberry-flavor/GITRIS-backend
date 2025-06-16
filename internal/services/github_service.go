@@ -137,7 +137,7 @@ func (s *GitHubService) GetDailyContributions(username, githubToken string, star
 	defer resp.Body.Close()
 
 	// レスポンスボディの読み込み
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("GitHubService Error: レスポンスボディの読み込みに失敗しました: %v", err)
 		return nil, fmt.Errorf("レスポンスボディの読み込みに失敗しました: %w", err)
