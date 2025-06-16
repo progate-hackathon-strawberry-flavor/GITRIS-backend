@@ -8,8 +8,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/handlers"
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
+	api "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/handlers"
+	auth "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/github"
 )
 
 func main() {
@@ -28,22 +30,22 @@ func main() {
 	}
 
 	// サービス層の初期化
-	githubService := services.NewGitHubService()
+	githubService := github.NewGitHubService()
 	// DatabaseService の初期化
-	databaseService, err := services.NewDatabaseService(databaseURL)
+	databaseService, err := database.NewDatabaseService(databaseURL)
 	if err != nil {
 		log.Fatalf("DatabaseService の初期化に失敗しました: %v", err)
 	}
 	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
 
 	// ハンドラ層の初期化
-	contributionHandler := handlers.NewContributionHandler(githubService, databaseService)
+	contributionHandler := api.NewContributionHandler(githubService, databaseService)
 
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
 	// 認証不要な公開エンドポイント
-	r.HandleFunc("/api/public", handlers.PublicHandler).Methods("GET")
+	r.HandleFunc("/api/public", api.PublicHandler).Methods("GET")
 
 	// データベースから保存済みのGitHub Contributionデータを取得するエンドポイント
 	// GET /api/contributions/{userID}
@@ -51,14 +53,14 @@ func main() {
 
 	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
 	// POST /api/contributions/refresh/{userID} (または PUT)
-	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST")
+	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("GET")
 
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
-	protectedRouter.Use(handlers.AuthMiddleware)
+	protectedRouter.Use(auth.AuthMiddleware)
 
 	// 認証が必要なエンドポイント
-	protectedRouter.HandleFunc("/decks", handlers.GetDecksForUser).Methods("GET")
+	protectedRouter.HandleFunc("/decks", api.GetDecksForUser).Methods("GET")
 
 	// ポート番号の設定
 	port := os.Getenv("PORT")

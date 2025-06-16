@@ -4,11 +4,12 @@ package handlers
 // ログインが必要なAPI検証のために一旦おいてる。
 // 実際のDeckではない
 
-
 import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
 	// "your_project_name/backend/internal/services" // ビジネスロジックを担うサービス層
 	// ここに Supabase と連携するためのコードや、デッキデータを扱うためのロジックを実装します。
 )
@@ -16,7 +17,7 @@ import (
 // GetDecksForUser は、認証されたユーザーのデッキリストを返すハンドラ関数です。
 func GetDecksForUser(w http.ResponseWriter, r *http.Request) {
 	// ContextからユーザーIDを取得
-	userID, ok := GetUserIDFromContext(r.Context())
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
 		// ミドルウェアが正しく動作していれば、ここには到達しないはずですが、念のため
 		log.Println("Error: User ID not found in context for GetDecksForUser")

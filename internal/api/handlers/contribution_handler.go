@@ -10,17 +10,18 @@ import (
 	"log"
 
 	"github.com/gorilla/mux"
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/github"
 )
 
 // ContributionHandler handles HTTP requests related to GitHub contributions.
 type ContributionHandler struct {
-	GitHubService *services.GitHubService
-	DatabaseService *services.DatabaseService
+	GitHubService *github.GitHubService
+	DatabaseService *database.DatabaseService
 }
 
 // NewContributionHandler creates a new instance of ContributionHandler.
-func NewContributionHandler(ghService *services.GitHubService, dbService *services.DatabaseService) *ContributionHandler {
+func NewContributionHandler(ghService *github.GitHubService, dbService *database.DatabaseService) *ContributionHandler {
 	return &ContributionHandler{
 		GitHubService: ghService,
 		DatabaseService: dbService,
