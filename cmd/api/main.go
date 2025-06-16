@@ -12,40 +12,59 @@ import (
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
 )
 
-func main(){
-	if os.Getenv("APP_ENV") != "production"{
+func main() {
+	// .envファイルを読み込む (本番環境以外の場合)
+	if os.Getenv("APP_ENV") != "production" {
 		err := godotenv.Load()
 		if err != nil {
-			log.Printf("warning: Error loading .env file (this is fine in production): %v", err)
+			log.Printf("warning: .envファイルの読み込み中にエラーが発生しました (本番環境では問題ありません): %v", err)
 		}
 	}
 
-	githubService := services.NewGitHubService()
-	contributionHandler := handlers.NewContributionHandler(githubService)
+	// データベースURLを環境変数から取得
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("エラー: DATABASE_URL 環境変数が設定されていません。")
+	}
 
+	// サービス層の初期化
+	githubService := services.NewGitHubService()
+	// DatabaseService の初期化
+	databaseService, err := services.NewDatabaseService(databaseURL)
+	if err != nil {
+		log.Fatalf("DatabaseService の初期化に失敗しました: %v", err)
+	}
+	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
+
+	// ハンドラ層の初期化
+	// DatabaseService を NewContributionHandler に渡す
+	contributionHandler := handlers.NewContributionHandler(githubService, databaseService)
+
+	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
+
 	// 認証不要な公開エンドポイント
-	// 例: GET /api/public
 	r.HandleFunc("/api/public", handlers.PublicHandler).Methods("GET")
 
+	// GitHub Contributionデータを取得し、データベースに保存するエンドポイント (認証不要)
+	r.HandleFunc("/api/contributions", contributionHandler.GetDailyContributionsHandler).Methods("GET")
+
 	// 認証が必要なルートグループを作成
-	// PathPrefix を使用して、特定のパスから始まるURLにのみミドルウェアを適用できます。
-	// 例えば、/api/protected/ で始まる全てのパスにAuthMiddlewareを適用します。
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
 	protectedRouter.Use(handlers.AuthMiddleware)
 
 	// 認証が必要なエンドポイント
 	protectedRouter.HandleFunc("/decks", handlers.GetDecksForUser).Methods("GET")
-	// 貢献データを取得するエンドポイント
-	r.HandleFunc("/api/contributions", contributionHandler.GetDailyContributionsHandler)
 
-
+	// ポート番号の設定
 	port := os.Getenv("PORT")
-	if port == ""{
+	if port == "" {
 		port = "8080"
 	}
-	log.Printf("Server starting on :%s", port)
-	fmt.Printf("GitHub Contribbutionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions?username=your_github_username\n",port)
-	// )
+
+	log.Printf("サーバーをポート %s で起動中...", port)
+	fmt.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions?username=your_github_username\n", port)
+
+	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
