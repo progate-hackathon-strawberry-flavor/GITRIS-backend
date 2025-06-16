@@ -97,18 +97,33 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 
 		// ホールドが空の場合
 		if state.HeldPiece == nil {
-			state.HeldPiece = state.CurrentPiece
-			state.CurrentPiece = state.GetNextPieceFromQueue()
+			// 現在のピースのコピーを作成してホールド
+			state.HeldPiece = &tetris.Piece{
+				Type:     state.CurrentPiece.Type,
+				X:        state.CurrentPiece.X,
+				Y:        state.CurrentPiece.Y,
+				Rotation: state.CurrentPiece.Rotation,
+			}
+			// 次のピースを現在のピースとして設定
+			state.CurrentPiece = state.NextPiece
+			state.NextPiece = state.GetNextPieceFromQueue()
 			state.CurrentPiece.X = tetris.BoardWidth/2 - 2
 			state.CurrentPiece.Y = 0
 			moved = true
 		} else {
-			// ホールドと現在のピースを入れ替え
-			temp := state.HeldPiece
-			state.HeldPiece = state.CurrentPiece
-			state.CurrentPiece = temp
+			// 現在のピースのコピーを作成
+			currentPieceCopy := &tetris.Piece{
+				Type:     state.CurrentPiece.Type,
+				X:        state.CurrentPiece.X,
+				Y:        state.CurrentPiece.Y,
+				Rotation: state.CurrentPiece.Rotation,
+			}
+			// ホールドピースを現在のピースとして設定
+			state.CurrentPiece = state.HeldPiece
 			state.CurrentPiece.X = tetris.BoardWidth/2 - 2
 			state.CurrentPiece.Y = 0
+			// 現在のピースのコピーをホールドピースとして設定
+			state.HeldPiece = currentPieceCopy
 			moved = true
 		}
 
