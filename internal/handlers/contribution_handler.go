@@ -42,7 +42,7 @@ func (h *ContributionHandler) GetDailyContributionsHandler(w http.ResponseWriter
 
 	githubToken := os.Getenv("GITHUB_TOKEN")
 	if githubToken == "" {
-		fmt.Println("警告: GITHUB_TOKEN 環境変数が設定されていません。")
+		log.Println("警告: GITHUB_TOKEN 環境変数が設定されていません。")
         http.Error(w, "サーバーサイドにGitHub Personal Access Tokenが設定されていません。", http.StatusInternalServerError)
         return
 	}
