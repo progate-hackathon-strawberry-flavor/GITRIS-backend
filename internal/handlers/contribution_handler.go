@@ -50,7 +50,7 @@ func (h *ContributionHandler) GetDailyContributionsHandler(w http.ResponseWriter
 	// データベースサービスを使って、userID (UUID) からGitHubユーザー名を取得
 	githubUsername, err := h.DatabaseService.GetGitHubUsernameByUserID(userID)
 	if err != nil {
-		fmt.Printf("GetGitHubUsernameByUserID エラー: %v\n", err)
+		log.Printf("GetGitHubUsernameByUserID エラー: %v", err)
 		http.Error(w, fmt.Sprintf("ユーザーID '%s' に対応するGitHubユーザー名が見つからないか、データベースエラーが発生しました: %v", userID, err), http.StatusInternalServerError)
 		return
 	}
