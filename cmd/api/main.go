@@ -1,7 +1,7 @@
 package main
 
 import (
-	// "fmt"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -45,8 +45,8 @@ func main() {
 	// 認証不要な公開エンドポイント
 	r.HandleFunc("/api/public", handlers.PublicHandler).Methods("GET")
 
-	// GitHub Contributionデータを取得し、データベースに保存するエンドポイント (認証不要)
-	// {userID} というパスパラメータでUUIDを受け取る
+	// データベースから保存済みのGitHub Contributionデータを取得するエンドポイント
+	// GET /api/contributions/{userID}
 	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET")
 
 	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
@@ -68,8 +68,9 @@ func main() {
 
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
-	log.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
-	log.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
+	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
+	fmt.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
+
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
