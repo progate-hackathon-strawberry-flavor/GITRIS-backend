@@ -9,6 +9,11 @@ import (
 	_ "github.com/lib/pq" // PostgreSQLドライバー
 )
 
+// DailyContribution represents a single day's contribution data.
+// type DailyContribution struct {
+// 	Date            string
+// 	ContributionCount int
+// }
 
 // DatabaseService provides methods for interacting with the database.
 type DatabaseService struct {
@@ -50,6 +55,37 @@ func (s *DatabaseService) GetGitHubUsernameByUserID(userID string) (string, erro
 	}
 	log.Printf("DatabaseService Info: ユーザーID %s に対応するGitHubユーザー名 '%s' を取得しました。", userID, githubUsername)
 	return githubUsername, nil
+}
+
+func (s *DatabaseService) GetContributionsByUserID(userID string)([]DailyContribution, error){
+	log.Printf("DatabaseService Info: ユーザーID %s の保存済み貢献データを取得中...", userID)
+	var contributions []DailyContribution
+	query := `SELECT date, contribution_count FROM contribution_data WHERE user_id = $1 ORDER BY date ASC`
+
+	rows, err := s.DB.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("保存ずみ貢献データのクエリ実行に失敗しました： %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var date time.Time
+		var count int
+		if err := rows.Scan(&date, &count); err != nil {
+			return nil, fmt.Errorf("保存ずみ貢献データのスキャンに失敗しました: %w", err)
+		}
+		contributions = append(contributions, DailyContribution{
+			Date: date.Format("2006-01-02"),
+			ContributionCount: count,
+		})
+	}
+	
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("保存ずみ貢献データの行処理中にエラーが発生しました: %w", err)
+	}
+
+	log.Printf("DatabaseService Info: ユーザーID %s の保存ずみ貢献データ %d 券を取得しました",userID, len(contributions))
+	return contributions, nil
 }
 
 

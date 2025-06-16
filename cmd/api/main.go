@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
 	"log"
 	"net/http"
 	"os"
@@ -47,7 +47,11 @@ func main() {
 
 	// GitHub Contributionデータを取得し、データベースに保存するエンドポイント (認証不要)
 	// {userID} というパスパラメータでUUIDを受け取る
-	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetDailyContributionsHandler).Methods("GET")
+	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET")
+
+	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
+	// POST /api/contributions/refresh/{userID} (または PUT)
+	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST")
 
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
@@ -64,7 +68,8 @@ func main() {
 
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
-	log.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}", port)
+	log.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
+	log.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
