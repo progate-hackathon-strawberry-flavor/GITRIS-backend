@@ -64,7 +64,7 @@ func main() {
 
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
-	fmt.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
+	log.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}", port)
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
