@@ -7,39 +7,38 @@ import (
 	"os"
 	"time"
 
+	"github.com/gorilla/mux" // gorilla/mux をインポート
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
 )
 
 // ContributionHandler handles HTTP requests related to GitHub contributions.
 type ContributionHandler struct {
 	GitHubService *services.GitHubService
-	DatabaseService *services.DatabaseService // DatabaseService を追加
+	DatabaseService *services.DatabaseService
 }
 
 // NewContributionHandler creates a new instance of ContributionHandler.
 func NewContributionHandler(ghService *services.GitHubService, dbService *services.DatabaseService) *ContributionHandler {
 	return &ContributionHandler{
 		GitHubService: ghService,
-		DatabaseService: dbService, // 初期化時に設定
+		DatabaseService: dbService,
 	}
 }
 
 // GetDailyContributionsHandler handles the request to fetch a user's daily contributions.
-// GET /api/contributions/{username}
+// GET /api/contributions/{userID}
 func (h *ContributionHandler) GetDailyContributionsHandler(w http.ResponseWriter, r *http.Request) {
-	// ここでは簡単化のため、クエリパラメータからユーザー名を取得します。
-	username := r.URL.Query().Get("username")
-	if username == "" {
-		http.Error(w, "ユーザー名が指定されていません (例: /api/contributions?username=your_github_username)", http.StatusBadRequest)
+	// gorilla/mux の Vars 関数を使ってURLパスからuserIDを取得
+	vars := mux.Vars(r)
+	userID := vars["userID"] // URLパスパラメータの名前は "userID" とする
+
+	if userID == "" {
+		http.Error(w, "ユーザーIDが指定されていません (例: /api/contributions/{UUID})", http.StatusBadRequest)
 		return
 	}
 
-	// **** 修正: ここを Supabase の users テーブルに存在する有効な UUID に変更してください ****
-	// これはデバッグおよびデータベース保存テスト用の一時的な対応です。
-	// 最終的には、Supabase認証フローを通じて取得したユーザーの auth.uid() を使用するように変更が必要です。
-	// 例: userID := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" // あなたのSupabaseユーザーIDに置き換えてください
-	// ここでは例として仮のUUIDを置いていますが、必ずご自身のデータベースにあるUUIDに置き換えてください。
-	userID := "ここに"
+	// SupabaseのUUIDが正しい形式か基本的なバリデーション (任意)
+	// 例: if !isValidUUID(userID) { http.Error(...); return }
 
 	githubToken := os.Getenv("GITHUB_TOKEN")
 	if githubToken == "" {
@@ -48,24 +47,34 @@ func (h *ContributionHandler) GetDailyContributionsHandler(w http.ResponseWriter
         return
 	}
 
+	// データベースサービスを使って、userID (UUID) からGitHubユーザー名を取得
+	githubUsername, err := h.DatabaseService.GetGitHubUsernameByUserID(userID)
+	if err != nil {
+		fmt.Printf("GetGitHubUsernameByUserID エラー: %v\n", err)
+		http.Error(w, fmt.Sprintf("ユーザーID '%s' に対応するGitHubユーザー名が見つからないか、データベースエラーが発生しました: %v", userID, err), http.StatusInternalServerError)
+		return
+	}
+
 	endDate := time.Now()
 	startDate := endDate.AddDate(0, 0, -8*7) // 8週間 = 56日前
 
-	dailyContributions, err := h.GitHubService.GetDailyContributions(username, githubToken, startDate, endDate)
+	// 取得したgithubUsernameを使ってGitHub APIを呼び出す
+	dailyContributions, err := h.GitHubService.GetDailyContributions(githubUsername, githubToken, startDate, endDate)
 	if err != nil {
-		fmt.Printf("貢献データの取得に失敗しました: %v\n", err)
-		http.Error(w, fmt.Sprintf("貢献データの取得に失敗しました: %v", err), http.StatusInternalServerError)
+		fmt.Printf("GitHub貢献データの取得に失敗しました: %v\n", err)
+		http.Error(w, fmt.Sprintf("GitHub貢献データの取得に失敗しました: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if h.DatabaseService != nil {
+		// データベースへの保存には、元の userID (UUID) を使用
 		err = h.DatabaseService.SaveContributions(userID, dailyContributions)
 		if err != nil {
 			fmt.Printf("貢献データのデータベース保存に失敗しました: %v\n", err)
 			http.Error(w, fmt.Sprintf("貢献データのデータベース保存に失敗しました: %v", err), http.StatusInternalServerError)
 			return
 		}
-		fmt.Printf("ユーザー %s の貢献データをデータベースに保存しました。\n", username)
+		fmt.Printf("ユーザー %s (GitHub: %s) の貢献データをデータベースに保存しました。\n", userID, githubUsername)
 	} else {
 		fmt.Println("警告: DatabaseServiceが初期化されていません。貢献データはデータベースに保存されません。")
 	}

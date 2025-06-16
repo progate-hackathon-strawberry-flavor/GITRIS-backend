@@ -37,7 +37,6 @@ func main() {
 	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
 
 	// ハンドラ層の初期化
-	// DatabaseService を NewContributionHandler に渡す
 	contributionHandler := handlers.NewContributionHandler(githubService, databaseService)
 
 	// gorilla/mux ルーターの初期化
@@ -47,7 +46,8 @@ func main() {
 	r.HandleFunc("/api/public", handlers.PublicHandler).Methods("GET")
 
 	// GitHub Contributionデータを取得し、データベースに保存するエンドポイント (認証不要)
-	r.HandleFunc("/api/contributions", contributionHandler.GetDailyContributionsHandler).Methods("GET")
+	// {userID} というパスパラメータでUUIDを受け取る
+	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetDailyContributionsHandler).Methods("GET")
 
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
@@ -63,7 +63,8 @@ func main() {
 	}
 
 	log.Printf("サーバーをポート %s で起動中...", port)
-	fmt.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions?username=your_github_username\n", port)
+	// ユーザーに新しいURL形式を伝えるメッセージ
+	fmt.Printf("GitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
