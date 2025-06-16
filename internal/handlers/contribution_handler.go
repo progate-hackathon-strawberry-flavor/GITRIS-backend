@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"log"
+
 	"github.com/gorilla/mux"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
 )
