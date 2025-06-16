@@ -84,7 +84,7 @@ func (s *DatabaseService) GetContributionsByUserID(userID string)([]DailyContrib
 		return nil, fmt.Errorf("保存ずみ貢献データの行処理中にエラーが発生しました: %w", err)
 	}
 
-	log.Printf("DatabaseService Info: ユーザーID %s の保存ずみ貢献データ %d 券を取得しました",userID, len(contributions))
+	log.Printf("DatabaseService Info: ユーザーID %s の保存ずみ貢献データ %d 件を取得しました",userID, len(contributions))
 	return contributions, nil
 }
 
