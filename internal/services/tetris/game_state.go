@@ -128,6 +128,7 @@ type GameSession struct {
 	Status    string           `json:"status"`  // "waiting", "playing", "finished"
 	StartedAt time.Time        `json:"started_at"` // ゲーム開始日時
 	EndedAt   time.Time        `json:"ended_at"`   // ゲーム終了日時
+	TimeLimit time.Duration    `json:"time_limit"` // ゲームの制限時間
 
 	// Internal communication channels for the session manager
 	InputCh  chan PlayerInputEvent // クライアントからのプレイヤー操作入力を受け取るチャネル
@@ -160,10 +161,11 @@ type GameStateEvent struct {
 func NewGameSession(roomID, player1ID string, player1Deck *models.Deck) *GameSession {
 	return &GameSession{
 		ID:           roomID,
-		Player1:      NewPlayerGameState(player1ID, player1Deck), // プレイヤー1のゲーム状態を初期化
-		Status:       "waiting",                                  // 初期状態は待機中
-		InputCh:      make(chan PlayerInputEvent, 100),           // バッファ付き入力チャネル
-		OutputCh:     make(chan GameStateEvent, 100),             // バッファ付き出力チャネル
+		Player1:      NewPlayerGameState(player1ID, player1Deck),
+		Status:       "waiting",
+		TimeLimit:    GameTimeLimit,
+		InputCh:      make(chan PlayerInputEvent, 100),
+		OutputCh:     make(chan GameStateEvent, 100),
 		GameLoopDone: make(chan struct{}),
 	}
 }
@@ -175,4 +177,12 @@ func NewGameSession(roomID, player1ID string, player1Deck *models.Deck) *GameSes
 //   player2Deck : プレイヤー2が使用するデッキデータ
 func (gs *GameSession) SetPlayer2(player2ID string, player2Deck *models.Deck) {
 	gs.Player2 = NewPlayerGameState(player2ID, player2Deck)
+}
+
+// IsTimeUp はゲームの制限時間が経過したかどうかを判定します。
+func (gs *GameSession) IsTimeUp() bool {
+	if gs.Status != "playing" {
+		return false
+	}
+	return time.Since(gs.StartedAt) >= gs.TimeLimit
 }

@@ -10,16 +10,17 @@ import (
 // GameLoopSettings はゲームループの速度設定など、ゲーム全体に影響する定数を定義します。
 const (
 	// FallInterval はピースが自動落下する間隔です。レベルが上がると短縮されます。
-	InitialFallInterval = 800 * time.Millisecond // 最初の自動落下間隔 (例: 0.8秒)
+	InitialFallInterval = 600 * time.Millisecond // 最初の自動落下間隔を0.6秒に短縮
 	SoftDropMultiplier  = 5                       // ソフトドロップ時の落下速度倍率
+	GameTimeLimit      = 120 * time.Second       // ゲームの制限時間（2分）
+	LevelUpLines       = 5                       // レベルアップに必要なライン数（5ラインごとにレベルアップ）
 	// LockDelay           = 500 * time.Millisecond // ピースが着地してから固定されるまでの猶予時間 (オプション)
 )
 
 // GetFallInterval は現在のレベルに基づいた自動落下間隔を計算して返します。
 func GetFallInterval(level int) time.Duration {
-	// 例: レベルが上がるごとに落下間隔が短くなるロジック
-	// 簡略化のため、ここでは一定の減少率を使用
-	interval := InitialFallInterval - time.Duration(level-1)*50*time.Millisecond
+	// レベルが上がるごとに落下間隔が短くなるロジック
+	interval := InitialFallInterval - time.Duration(level-1)*40*time.Millisecond
 	if interval < 100*time.Millisecond { // 最小値を設定
 		interval = 100 * time.Millisecond
 	}
@@ -179,18 +180,16 @@ func handlePieceLock(state *PlayerGameState) {
 
 	if clearedLines > 0 {
 		// コンボやBack-to-Backなどのボーナス計算をここに実装
-		// 例: スコア計算の調整
 		state.Score += CalculateScore(clearedLines, state.Level, state.ConsecutiveClears, state.BackToBack)
 
 		// 連続ラインクリアの更新
 		state.ConsecutiveClears++
-		state.BackToBack = (clearedLines == 4) // 例: テトリス（4ラインクリア）でB2Bをセット
+		state.BackToBack = (clearedLines == 4) // テトリス（4ラインクリア）でB2Bをセット
 
-		// レベルアップのロジック (例: 10ラインクリアごとにレベルアップ)
-		state.Level = state.LinesCleared/10 + 1
+		// レベルアップのロジック (5ラインクリアごとにレベルアップ)
+		state.Level = state.LinesCleared/LevelUpLines + 1
 
 		// TODO: マルチプレイの場合、お邪魔ブロック送信ロジックを SessionManager に通知
-		// 例: if clearedLines > 1 { sm.SendGarbage(opponentID, clearedLines - 1) }
 	} else {
 		// ラインクリアがない場合、連続クリアカウンターをリセット
 		state.ConsecutiveClears = 0
