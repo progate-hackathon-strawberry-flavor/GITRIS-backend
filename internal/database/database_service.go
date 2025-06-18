@@ -78,7 +78,7 @@ func (s *DatabaseService) GetContributionsByUserID(userID string) ([]models.Dail
 		var count int
 		if err := rows.Scan(&date, &count); err != nil {
 			log.Printf("DatabaseService Error: 行のスキャンエラー: %v", err)
-			return nil, fmt.Errorf("保存ずみ貢献データのスキャンに失敗しました: %w", err)
+			return nil, fmt.Errorf("保存済み貢献データのスキャンに失敗しました: %w", err)
 		}
 		contributions = append(contributions, models.DailyContribution{
 			Date:  date.Format("2006-01-02"),
