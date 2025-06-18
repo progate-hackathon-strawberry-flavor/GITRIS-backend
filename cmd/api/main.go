@@ -53,7 +53,7 @@ func main() {
 
 	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
 	// POST /api/contributions/refresh/{userID} (または PUT)
-	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("GET")
+	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST")
 
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
