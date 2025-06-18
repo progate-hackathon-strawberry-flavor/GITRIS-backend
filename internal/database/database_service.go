@@ -1,4 +1,4 @@
-package services
+package database
 
 import (
 	"database/sql"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQLドライバー
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models"
 )
 
 // DailyContribution represents a single day's contribution data.
@@ -57,83 +58,84 @@ func (s *DatabaseService) GetGitHubUsernameByUserID(userID string) (string, erro
 	return githubUsername, nil
 }
 
-func (s *DatabaseService) GetContributionsByUserID(userID string)([]DailyContribution, error){
+// GetContributionsByUserID retrieves all contributions for a specific user from the database.
+func (s *DatabaseService) GetContributionsByUserID(userID string) ([]models.DailyContribution, error) {
 	log.Printf("DatabaseService Info: ユーザーID %s の保存済み貢献データを取得中...", userID)
-	var contributions []DailyContribution
+	var contributions []models.DailyContribution
 	query := `SELECT date, contribution_count FROM contribution_data WHERE user_id = $1 ORDER BY date ASC`
 
+	log.Printf("DatabaseService Debug: クエリを実行します: %s", query)
 	rows, err := s.DB.Query(query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("保存ずみ貢献データのクエリ実行に失敗しました： %w", err)
+		log.Printf("DatabaseService Error: クエリ実行エラー: %v", err)
+		return nil, fmt.Errorf("保存済み貢献データの取得に失敗しました: %w", err)
 	}
 	defer rows.Close()
 
+	log.Printf("DatabaseService Debug: クエリ実行成功、結果をスキャンします")
 	for rows.Next() {
 		var date time.Time
 		var count int
 		if err := rows.Scan(&date, &count); err != nil {
-			return nil, fmt.Errorf("保存ずみ貢献データのスキャンに失敗しました: %w", err)
+			log.Printf("DatabaseService Error: 行のスキャンエラー: %v", err)
+			return nil, fmt.Errorf("保存済み貢献データのスキャンに失敗しました: %w", err)
 		}
-		contributions = append(contributions, DailyContribution{
-			Date: date.Format("2006-01-02"),
-			ContributionCount: count,
+		contributions = append(contributions, models.DailyContribution{
+			Date:  date.Format("2006-01-02"),
+			Count: count,
 		})
 	}
-	
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("保存ずみ貢献データの行処理中にエラーが発生しました: %w", err)
+
+	if err := rows.Err(); err != nil {
+		log.Printf("DatabaseService Error: 行のイテレーションエラー: %v", err)
+		return nil, fmt.Errorf("保存済み貢献データのイテレーション中にエラーが発生しました: %w", err)
 	}
 
-	log.Printf("DatabaseService Info: ユーザーID %s の保存ずみ貢献データ %d 件を取得しました",userID, len(contributions))
+	log.Printf("DatabaseService Info: ユーザーID %s の保存済み貢献データ %d 件を取得しました", userID, len(contributions))
 	return contributions, nil
 }
 
-
 // SaveContributions saves a slice of daily contributions for a given user.
 // It first deletes existing contributions for the user and then inserts the new ones.
-func (s *DatabaseService) SaveContributions(userID string, contributions []DailyContribution) error {
-	tx, err := s.DB.Begin() // トランザクションを開始
+func (s *DatabaseService) SaveContributions(userID string, contributions []models.DailyContribution) error {
+	tx, err := s.DB.Begin()
 	if err != nil {
-		log.Printf("DatabaseService Error: トランザクションの開始に失敗しました: %v", err)
 		return fmt.Errorf("トランザクションの開始に失敗しました: %w", err)
 	}
-	defer tx.Rollback() // エラーが発生した場合はロールバック
+	defer tx.Rollback()
 
-	// 1. 既存のcontribution_dataを全て削除
-	log.Printf("DatabaseService Info: ユーザーID %s の既存の貢献データを削除中...", userID)
-	deleteStmt := `DELETE FROM contribution_data WHERE user_id = $1`
-	_, err = tx.Exec(deleteStmt, userID)
+	// 既存のデータを削除
+	_, err = tx.Exec("DELETE FROM contribution_data WHERE user_id = $1", userID)
 	if err != nil {
 		return fmt.Errorf("既存の貢献データの削除に失敗しました: %w", err)
 	}
-	log.Printf("DatabaseService Info: ユーザーID %s の既存の貢献データを削除しました。", userID)
 
-	// 2. 新しい貢献データを挿入
-	insertStmt := `
-		INSERT INTO contribution_data (user_id, date, contribution_count, created_at)
-		VALUES ($1, $2, $3, $4)
-	`
+	// 新しいデータを挿入
+	stmt, err := tx.Prepare(`
+		INSERT INTO contribution_data (user_id, date, contribution_count)
+		VALUES ($1, $2, $3)
+	`)
+	if err != nil {
+		return fmt.Errorf("INSERT文の準備に失敗しました: %w", err)
+	}
+	defer stmt.Close()
+
 	for _, c := range contributions {
-		// 日付文字列を time.Time にパース
-		parsedDate, err := time.Parse("2006-01-02", c.Date)
+		date, err := time.Parse("2006-01-02", c.Date)
 		if err != nil {
-			return fmt.Errorf("日付のパースに失敗しました (%s): %w", c.Date, err)
+			return fmt.Errorf("日付のパースに失敗しました: %w", err)
 		}
-
-		_, err = tx.Exec(
-			insertStmt,
-			userID,
-			parsedDate,
-			c.ContributionCount,
-			time.Now(), // created_at
-		)
+		_, err = stmt.Exec(userID, date, c.Count)
 		if err != nil {
-			return fmt.Errorf("貢献データの挿入に失敗しました (日付: %s, 貢献数: %d): %w", c.Date, c.ContributionCount, err)
+			return fmt.Errorf("貢献データの挿入に失敗しました: %w", err)
 		}
 	}
-	log.Printf("DatabaseService Info: ユーザーID %s の新しい貢献データ %d 件を挿入しました。", userID, len(contributions))
 
-	return tx.Commit() // トランザクションをコミット
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("トランザクションのコミットに失敗しました: %w", err)
+	}
+
+	return nil
 }
 
 // min helper function for logging
@@ -143,3 +145,5 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+

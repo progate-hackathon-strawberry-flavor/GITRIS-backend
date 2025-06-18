@@ -1,4 +1,4 @@
-package services
+package github
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"log" // log パッケージを追加
 	"net/http"
 	"time"
+
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models"
 )
 
 // DailyContribution represents a single day's contribution data.
@@ -19,14 +21,14 @@ type DailyContribution struct {
 // GitHubService provides methods for interacting with the GitHub API.
 type GitHubService struct {
 	githubAPIURL string
-	httpClient   *http.Client
+	client       *http.Client
 }
 
 // NewGitHubService creates a new instance of GitHubService.
 func NewGitHubService() *GitHubService {
 	return &GitHubService{
 		githubAPIURL: "https://api.github.com/graphql",
-		httpClient:   &http.Client{Timeout: 30 * time.Second}, // タイムアウトを少し長くする
+		client:       &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -70,7 +72,7 @@ type GitHubGraphQLResponse struct {
 }
 
 // GetDailyContributions fetches daily contribution data for a given GitHub user.
-func (s *GitHubService) GetDailyContributions(username, githubToken string, startDate, endDate time.Time) ([]DailyContribution, error) {
+func (s *GitHubService) GetDailyContributions(username, token string, startDate, endDate time.Time) ([]models.DailyContribution, error) {
 	log.Printf("GitHubService: ユーザー '%s' の貢献データを取得開始。期間: %s から %s", username, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
 
 	// GraphQLクエリの定義: 日ごとのContribution数を取得するためのクエリ
@@ -121,15 +123,15 @@ func (s *GitHubService) GetDailyContributions(username, githubToken string, star
 
 	// ヘッダーの設定
 	req.Header.Set("Content-Type", "application/json")
-	if githubToken != "" {
-		req.Header.Set("Authorization", "Bearer "+githubToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 		log.Println("GitHubService Debug: GitHub Personal Access Tokenがヘッダーに設定されました。")
 	} else {
 		log.Println("警告: GitHub Personal Access Tokenが提供されていません。レート制限に引っかかる可能性があります。")
 	}
 
 	// HTTPクライアントでリクエストを送信
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		log.Printf("GitHubService Error: HTTPリクエストの送信に失敗しました: %v", err)
 		return nil, fmt.Errorf("HTTPリクエストの送信に失敗しました: %w", err)
@@ -178,17 +180,17 @@ func (s *GitHubService) GetDailyContributions(username, githubToken string, star
 	// データが取得できたか確認
 	if githubResp.Data.User == nil || githubResp.Data.User.ContributionsCollection == nil || githubResp.Data.User.ContributionsCollection.ContributionCalendar == nil {
 		log.Printf("GitHubService Info: ユーザーの貢献データが見つからないか、クエリの結果が空です。username: %s", username)
-		return []DailyContribution{}, nil // 空のスライスを返す
+		return []models.DailyContribution{}, nil // 空のスライスを返す
 	}
 
 
 	// 取得したContributionデータをDailyContributionスライスに変換
-	var dailyContributions []DailyContribution
+	var dailyContributions []models.DailyContribution
 	for _, week := range githubResp.Data.User.ContributionsCollection.ContributionCalendar.Weeks {
 		for _, day := range week.ContributionDays {
-			dailyContributions = append(dailyContributions, DailyContribution{
-				Date:            day.Date,
-				ContributionCount: day.ContributionCount,
+			dailyContributions = append(dailyContributions, models.DailyContribution{
+				Date:  day.Date,
+				Count: day.ContributionCount,
 			})
 		}
 	}
