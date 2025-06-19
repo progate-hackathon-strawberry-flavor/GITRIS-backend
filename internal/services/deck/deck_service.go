@@ -6,13 +6,14 @@ import (
 	"log"
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database" // プロジェクトのルートパスに合わせて修正
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models" // modelsパッケージをインポート
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models"   // modelsパッケージをインポート
 	// プロジェクトのルートパスに合わせて修正
 )
 
 // DeckService はデッキ関連のビジネスロジックを定義するインターフェースです。
 type DeckService interface {
 	SaveDeck(userID string, tetriminos []models.TetriminoPlacementRequest) error
+	GetDeckWithPlacementsByUserID(userID string) (*models.DeckWithPlacements, error)
 }
 
 // deckServiceImpl はDeckServiceインターフェースの実装です。
@@ -65,7 +66,7 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 	}
 
 	// 該当ユーザーの既存のtetrimino_placementsレコードを全て削除します
-	err = s.deckRepo.DeletetetriminoPlacementsByDeckID(tx, deckID)
+	err = s.deckRepo.DeleteTetriminoPlacementsByDeckID(tx, deckID)
 	if err != nil {
 		return fmt.Errorf("既存のテトリミノ配置の削除に失敗しました: %w", err)
 	}
@@ -97,4 +98,42 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 
 	log.Println("デッキが正常に保存されました。")
 	return nil
+}
+
+// GetDeckWithPlacementsByUserID は指定されたユーザーIDのデッキとそのテトリミノ配置情報を取得します。
+func (s *deckServiceImpl) GetDeckWithPlacementsByUserID(userID string) (*models.DeckWithPlacements, error) {
+	// 読み取り専用操作なのでトランザクションは必須ではないが、一貫性のために使用することも可能
+	// 今回はシンプルにtx=nilでリポジトリメソッドを呼び出す（直接dbを使う）
+	deck, err := s.deckRepo.GetDeckByUserID(nil, userID) // tx=nilで呼び出す
+	if err != nil {
+		return nil, fmt.Errorf("ユーザーID '%s' のデッキ取得に失敗しました: %w", userID, err)
+	}
+	if deck == nil {
+		return nil, nil // デッキが存在しない
+	}
+
+	placements, err := s.deckRepo.GetTetriminoPlacementsByDeckID(nil, deck.ID) // tx=nilで呼び出す
+	if err != nil {
+		return nil, fmt.Errorf("デッキID '%s' のテトリミノ配置取得に失敗しました: %w", deck.ID, err)
+	}
+
+	// APIレスポンス用のPlacementsを作成
+	apiPlacements := make([]models.TetriminoPlacementAPI, len(placements))
+	for i, p := range placements {
+		apiPlacements[i] = models.TetriminoPlacementAPI{
+			ID:            p.ID,
+			TetriminoType: p.TetriminoType,
+			Rotation:      p.Rotation,
+			StartDate:     p.StartDate.Format("2006-01-02"), // YYYY-MM-DD 形式にフォーマット
+			Positions:     p.Positions,                       // json.RawMessage をそのまま渡す
+			ScorePotential: p.ScorePotential,
+		}
+	}
+
+	deckWithPlacements := &models.DeckWithPlacements{
+		Deck:       deck,
+		Placements: apiPlacements,
+	}
+
+	return deckWithPlacements, nil
 }

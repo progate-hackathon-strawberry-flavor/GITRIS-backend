@@ -17,8 +17,9 @@ type DeckRepository interface {
 	GetDeckByUserID(tx *sql.Tx, userID string) (*models.Deck, error)
 	CreateDeck(tx *sql.Tx, userID string, initialTotalScore int) (*models.Deck, error)
 	UpdateDeckTotalScore(tx *sql.Tx, deckID string, totalScore int) error
-	DeletetetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) error
+	DeleteTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) error
 	BulkInserttetriminoPlacements(tx *sql.Tx, deckID string, placements []models.TetriminoPlacementRequest) error
+	GetTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) ([]models.TetriminoPlacement, error)
 }
 
 // deckRepositoryImpl はDeckRepositoryインターフェースの実装です。
@@ -34,7 +35,14 @@ func NewDeckRepository(db *sql.DB) DeckRepository {
 // GetDeckByUserID は指定されたユーザーIDのデッキを取得します。
 func (r *deckRepositoryImpl) GetDeckByUserID(tx *sql.Tx, userID string) (*models.Deck, error) {
 	deck := &models.Deck{}
-	row := tx.QueryRow("SELECT id, user_id, total_score, created_at, updated_at FROM decks WHERE user_id = $1", userID)
+	// NOTE: トランザクションがnilの場合も考慮 (Read-only操作のため)
+	var row *sql.Row
+	if tx != nil {
+		row = tx.QueryRow("SELECT id, user_id, total_score, created_at, updated_at FROM decks WHERE user_id = $1", userID)
+	} else {
+		row = r.db.QueryRow("SELECT id, user_id, total_score, created_at, updated_at FROM decks WHERE user_id = $1", userID)
+	}
+
 	err := row.Scan(&deck.ID, &deck.UserID, &deck.TotalScore, &deck.CreatedAt, &deck.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil // デッキが存在しない場合はnilを返す
@@ -74,8 +82,8 @@ func (r *deckRepositoryImpl) UpdateDeckTotalScore(tx *sql.Tx, deckID string, tot
 	return nil
 }
 
-// DeletetetriminoPlacementsByDeckID は指定されたデッキIDの全てのテトリミノ配置を削除します。
-func (r *deckRepositoryImpl) DeletetetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) error {
+// DeleteTetriminoPlacementsByDeckID は指定されたデッキIDの全てのテトリミノ配置を削除します。
+func (r *deckRepositoryImpl) DeleteTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) error {
 	_, err := tx.Exec("DELETE FROM tetrimino_placements WHERE deck_id = $1", deckID)
 	if err != nil {
 		return fmt.Errorf("既存のテトリミノ配置の削除に失敗しました: %w", err)
@@ -116,4 +124,51 @@ func (r *deckRepositoryImpl) BulkInserttetriminoPlacements(tx *sql.Tx, deckID st
 		}
 	}
 	return nil
+}
+
+// GetTetriminoPlacementsByDeckID は指定されたデッキIDの全てのテトリミノ配置を取得します。
+func (r *deckRepositoryImpl) GetTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) ([]models.TetriminoPlacement, error) {
+	placements := []models.TetriminoPlacement{}
+
+	// NOTE: トランザクションがnilの場合も考慮 (Read-only操作のため)
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(
+			`SELECT id, deck_id, tetrimino_type, rotation, start_date, positions, score_potential, created_at
+			 FROM tetrimino_placements WHERE deck_id = $1`, deckID)
+	} else {
+		rows, err = r.db.Query(
+			`SELECT id, deck_id, tetrimino_type, rotation, start_date, positions, score_potential, created_at
+			 FROM tetrimino_placements WHERE deck_id = $1`, deckID)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("テトリミノ配置のクエリに失敗しました: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p models.TetriminoPlacement
+		err := rows.Scan(
+			&p.ID,
+			&p.DeckID,
+			&p.TetriminoType,
+			&p.Rotation,
+			&p.StartDate,
+			&p.Positions, // json.RawMessage に直接スキャン
+			&p.ScorePotential,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("テトリミノ配置のスキャンに失敗しました: %w", err)
+		}
+		placements = append(placements, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("テトリミノ配置の行イテレーション中にエラーが発生しました: %w", err)
+	}
+
+	return placements, nil
 }

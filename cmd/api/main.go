@@ -49,7 +49,7 @@ func main() {
 	// ハンドラ層の初期化
 	contributionHandler := api.NewContributionHandler(githubService, databaseService)
 	deckSaveHandler := api.NewDeckSaveHandler(deckService) // デッキ保存ハンドラの初期化
-
+	deckGetHandler := api.NewDeckGetHandler(deckService) // デッキ取得ハンドラの初期化
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
@@ -71,11 +71,10 @@ func main() {
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
 	protectedRouter.Use(auth.AuthMiddleware)
 
-	// 認証が必要なエンドポイント
-	protectedRouter.HandleFunc("/decks", api.GetDecksForUser).Methods("GET")
-	// ★★★ デッキ保存APIのルートを追加 ★★★
 	// 認証済みユーザーのみが自身のデッキを保存できるようにします
 	protectedRouter.Handle("/deck/save", deckSaveHandler).Methods("POST")
+	// 認証済みユーザーのデッキを取得できるようにします
+	protectedRouter.Handle("/deck/{userID}", deckGetHandler).Methods("GET")
 
 
 	// ポート番号の設定
