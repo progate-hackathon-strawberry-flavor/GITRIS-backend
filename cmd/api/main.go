@@ -44,6 +44,9 @@ func main() {
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
+	// これにより、すべてのリクエストがまずCORSハンドラを通過するようになります。
+	r.Use(auth.CORSHandler())
+
 	// 認証不要な公開エンドポイント
 	r.HandleFunc("/api/public", api.PublicHandler).Methods("GET")
 
@@ -72,7 +75,6 @@ func main() {
 	// ユーザーに新しいURL形式を伝えるメッセージ
 	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
 	fmt.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
-
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))
