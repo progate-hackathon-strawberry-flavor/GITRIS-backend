@@ -73,7 +73,7 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 	log.Printf("デッキ %s の既存のテトリミノ配置が削除されました。", deckID)
 
 	// 受け取ったtetriminos配列の各要素をtetrimino_placementsテーブルに新規レコードとして挿入します
-	err = s.deckRepo.BulkInserttetriminoPlacements(tx, deckID, tetriminos)
+	err = s.deckRepo.BulkInsertTetriminoPlacements(tx, deckID, tetriminos)
 	if err != nil {
 		return fmt.Errorf("テトリミノ配置の挿入に失敗しました: %w", err)
 	}

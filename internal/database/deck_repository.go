@@ -18,7 +18,7 @@ type DeckRepository interface {
 	CreateDeck(tx *sql.Tx, userID string, initialTotalScore int) (*models.Deck, error)
 	UpdateDeckTotalScore(tx *sql.Tx, deckID string, totalScore int) error
 	DeleteTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) error
-	BulkInserttetriminoPlacements(tx *sql.Tx, deckID string, placements []models.TetriminoPlacementRequest) error
+	BulkInsertTetriminoPlacements(tx *sql.Tx, deckID string, placements []models.TetriminoPlacementRequest) error
 	GetTetriminoPlacementsByDeckID(tx *sql.Tx, deckID string) ([]models.TetriminoPlacement, error)
 }
 
@@ -91,8 +91,8 @@ func (r *deckRepositoryImpl) DeleteTetriminoPlacementsByDeckID(tx *sql.Tx, deckI
 	return nil
 }
 
-// BulkInserttetriminoPlacements は複数のテトリミノ配置を一度に挿入します。
-func (r *deckRepositoryImpl) BulkInserttetriminoPlacements(tx *sql.Tx, deckID string, placements []models.TetriminoPlacementRequest) error {
+// BulkInsertTetriminoPlacements は複数のテトリミノ配置を一度に挿入します。
+func (r *deckRepositoryImpl) BulkInsertTetriminoPlacements(tx *sql.Tx, deckID string, placements []models.TetriminoPlacementRequest) error {
 	if len(placements) == 0 {
 		return nil // 挿入するデータがない場合は何もしない
 	}
