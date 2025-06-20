@@ -12,6 +12,7 @@ import (
 	auth "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/github"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/deck" // 新しいサービスのインポート
 )
 
 func main() {
@@ -31,16 +32,24 @@ func main() {
 
 	// サービス層の初期化
 	githubService := github.NewGitHubService()
-	// DatabaseService の初期化
+	// DatabaseService の初期化 (ここで *sql.DB インスタンスも保持している)
 	databaseService, err := database.NewDatabaseService(databaseURL)
 	if err != nil {
 		log.Fatalf("DatabaseService の初期化に失敗しました: %v", err)
 	}
 	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
+	fmt.Println("データベース接続が正常に確立されました。")
+
+
+	// Deck関連の依存関係の初期化
+	// databaseService.DB を直接リポジトリとサービスに渡す
+	deckRepo := database.NewDeckRepository(databaseService.DB)
+	deckService := services.NewDeckService(databaseService.DB, deckRepo)
 
 	// ハンドラ層の初期化
 	contributionHandler := api.NewContributionHandler(githubService, databaseService)
-
+	deckSaveHandler := api.NewDeckSaveHandler(deckService) // デッキ保存ハンドラの初期化
+	deckGetHandler := api.NewDeckGetHandler(deckService) // デッキ取得ハンドラの初期化
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
@@ -62,8 +71,11 @@ func main() {
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
 	protectedRouter.Use(auth.AuthMiddleware)
 
-	// 認証が必要なエンドポイント
-	protectedRouter.HandleFunc("/decks", api.GetDecksForUser).Methods("GET")
+	// 認証済みユーザーのみが自身のデッキを保存できるようにします
+	protectedRouter.Handle("/deck/save", deckSaveHandler).Methods("POST")
+	// 認証済みユーザーのデッキを取得できるようにします
+	protectedRouter.Handle("/deck/{userID}", deckGetHandler).Methods("GET")
+
 
 	// ポート番号の設定
 	port := os.Getenv("PORT")
@@ -75,6 +87,8 @@ func main() {
 	// ユーザーに新しいURL形式を伝えるメッセージ
 	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
 	fmt.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
+	fmt.Printf("デッキを保存するには、認証トークンと以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/protected/deck/save\n", port)
+
 
 	// HTTPサーバーの起動
 	log.Fatal(http.ListenAndServe(":"+port, r))

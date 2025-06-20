@@ -11,11 +11,11 @@ import (
 
 func TestNewPlayerGameState(t *testing.T) {
 	// テスト用のデッキデータを作成
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now()
 	deck := &models.Deck{
 		ID:          "test-deck-1",
-		Name:        "Test Deck",
-		Description: "Test deck for unit testing",
+		// Name:        "Test Deck",
+		// Description: "Test deck for unit testing",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -58,11 +58,11 @@ func TestNewPlayerGameState(t *testing.T) {
 }
 
 func TestGeneratePieceQueue(t *testing.T) {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now()
 	deck := &models.Deck{
 		ID:          "test-deck-2",
-		Name:        "Test Deck 2",
-		Description: "Test deck for piece queue testing",
+		// Name:        "Test Deck 2",
+		// Description: "Test deck for piece queue testing",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -97,11 +97,11 @@ func TestGeneratePieceQueue(t *testing.T) {
 }
 
 func TestGetNextPieceFromQueue(t *testing.T) {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now()
 	deck := &models.Deck{
 		ID:          "test-deck-3",
-		Name:        "Test Deck 3",
-		Description: "Test deck for next piece testing",
+		// Name:        "Test Deck 3",
+		// Description: "Test deck for next piece testing",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -125,11 +125,11 @@ func TestGetNextPieceFromQueue(t *testing.T) {
 }
 
 func TestSpawnNewPiece(t *testing.T) {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now()
 	deck := &models.Deck{
 		ID:          "test-deck-4",
-		Name:        "Test Deck 4",
-		Description: "Test deck for piece spawning testing",
+		// Name:        "Test Deck 4",
+		// Description: "Test deck for piece spawning testing",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
