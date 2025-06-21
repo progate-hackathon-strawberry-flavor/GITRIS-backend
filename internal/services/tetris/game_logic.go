@@ -1,6 +1,7 @@
 package tetris
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -27,60 +28,53 @@ func GetFallInterval(level int) time.Duration {
 	return interval
 }
 
-// ApplyPlayerInput はプレイヤーの入力（アクション）に基づいて、
-// 指定されたプレイヤーのゲーム状態を更新します。
+// ApplyPlayerInput はプレイヤーの入力をゲーム状態に適用します。
 //
 // Parameters:
-//   state  : 更新するプレイヤーのゲーム状態のポインタ
-//   action : プレイヤーが実行したアクション（例: "move_left", "rotate"）
+//   state : 更新するプレイヤーのゲーム状態のポインタ
+//   action : プレイヤーが実行したアクション（"left", "right", "rotate_left", "rotate_right", "soft_drop", "hard_drop", "hold"）
 // Returns:
-//   bool: ゲーム状態が実際に変更された場合はtrue、変更されなかった場合はfalse
+//   bool: ピースが移動・回転・固定されたかどうか（描画更新の判定に使用）
 func ApplyPlayerInput(state *PlayerGameState, action string) bool {
-	if state.IsGameOver || state.CurrentPiece == nil {
-		return false // ゲームオーバーまたはピースがない場合は操作を受け付けない
+	if state.CurrentPiece == nil || state.IsGameOver {
+		return false // ゲームオーバーまたは現在のピースがない場合は何もしない
 	}
 
-	// ピースの操作は、まずクローンに対して行い、衝突判定後に実際のピースに適用します。
-	// これにより、衝突しない場合にのみ変更を反映できます。
 	moved := false
-	tempPiece := state.CurrentPiece.Clone()
 
 	switch action {
-	case "move_left":
-		if !state.Board.HasCollision(tempPiece, -1, 0) {
+	case "left", "move_left":
+		if !state.Board.HasCollision(state.CurrentPiece, -1, 0) {
 			state.CurrentPiece.X--
 			moved = true
 		}
-	case "move_right":
-		if !state.Board.HasCollision(tempPiece, 1, 0) {
+	case "right", "move_right":
+		if !state.Board.HasCollision(state.CurrentPiece, 1, 0) {
 			state.CurrentPiece.X++
 			moved = true
 		}
 	case "rotate", "rotate_right":
-		tempPiece.Rotate() // 時計回りに回転
-		// 回転後の衝突判定と壁蹴り (Wall Kick) ロジックをここに実装
-		// SRS (Super Rotation System) は複雑なので、最初は単純な衝突判定から始めるのが良いでしょう。
-		if !state.Board.HasCollision(tempPiece, 0, 0) {
-			state.CurrentPiece.Rotate() // 実際のピースを回転
-			moved = true
+		// 時計回り（右回転）
+		originalRotation := state.CurrentPiece.Rotation
+		state.CurrentPiece.Rotation = (originalRotation + 90) % 360
+		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+			// 回転に失敗した場合は元に戻す
+			state.CurrentPiece.Rotation = originalRotation
 		} else {
-			// TODO: SRS Wall Kick Logic を実装する場合はここに追加
-			// 例えば、特定のオフセットで再試行する
-			// if !state.Board.HasCollision(tempPiece, -1, 0) { state.CurrentPiece.X--; state.CurrentPiece.Rotate(); moved = true }
+			moved = true
 		}
 	case "rotate_left":
-		// 反時計回りに回転（3回時計回りに回転することで実現）
-		tempPiece.Rotate()
-		tempPiece.Rotate()
-		tempPiece.Rotate()
-		if !state.Board.HasCollision(tempPiece, 0, 0) {
-			state.CurrentPiece.Rotate()
-			state.CurrentPiece.Rotate()
-			state.CurrentPiece.Rotate()
+		// 反時計回り（左回転）
+		originalRotation := state.CurrentPiece.Rotation
+		state.CurrentPiece.Rotation = (originalRotation - 90 + 360) % 360
+		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+			// 回転に失敗した場合は元に戻す
+			state.CurrentPiece.Rotation = originalRotation
+		} else {
 			moved = true
 		}
 	case "soft_drop": // 通常落下を加速
-		if !state.Board.HasCollision(tempPiece, 0, 1) {
+		if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
 			state.CurrentPiece.Y++
 			state.Score += 1 // ソフトドロップのボーナス (仮)
 			moved = true
@@ -103,76 +97,118 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 		handlePieceLock(state) // 固定後の処理
 		state.lastFallTime = time.Now() // ハードドロップしたら落下タイマーをリセット
 		moved = true
-	case "hold": // ホールド機能
+	case "hold":
+		// ホールド機能の安全性チェック
 		if state.CurrentPiece == nil {
-			return false
+			log.Printf("[WARN] Hold action attempted with nil CurrentPiece for user %s", state.UserID)
+			break // 現在のピースがない場合は何もしない
 		}
-
-		// ホールドが空の場合
+		
 		if state.HeldPiece == nil {
-			// 現在のピースのコピーを作成してホールド
+			// 初回ホールド: 現在のピースをホールドし、次のピースを現在のピースにする
 			state.HeldPiece = &tetris.Piece{
 				Type:     state.CurrentPiece.Type,
-				X:        state.CurrentPiece.X,
-				Y:        state.CurrentPiece.Y,
-				Rotation: state.CurrentPiece.Rotation,
+				X:        0,
+				Y:        0,
+				Rotation: 0,
+				ScoreData: make(map[string]int), // ScoreDataマップを初期化
 			}
-			// 次のピースを現在のピースとして設定
+			
+			// ScoreDataを深いコピー
+			if state.CurrentPiece.ScoreData != nil {
+				for key, value := range state.CurrentPiece.ScoreData {
+					state.HeldPiece.ScoreData[key] = value
+				}
+			}
+			
 			state.CurrentPiece = state.NextPiece
-			state.NextPiece = state.GetNextPieceFromQueue()
-			// テトリミノの種類に応じた適切な初期位置を設定
-			switch state.CurrentPiece.Type {
-			case tetris.TypeI:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-				state.CurrentPiece.Y = -1
-			case tetris.TypeO:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = 0
-			case tetris.TypeL:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = 0
-			default:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = -1
+			if state.CurrentPiece == nil {
+				log.Printf("[ERROR] NextPiece is nil during hold for user %s", state.UserID)
+				state.CurrentPiece = state.GetNextPieceFromQueue()
 			}
-			state.CurrentPiece.Rotation = 0
+			
+			state.NextPiece = state.GetNextPieceFromQueue()
+			
+			// テトリミノの種類に応じた適切な初期位置を設定
+			if state.CurrentPiece != nil {
+				switch state.CurrentPiece.Type {
+				case tetris.TypeI:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 2
+					state.CurrentPiece.Y = 1
+				case tetris.TypeO:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				case tetris.TypeL:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				default:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				}
+				state.CurrentPiece.Rotation = 0
+			}
 			moved = true
 		} else {
-			// 現在のピースのコピーを作成
+			// 2回目以降のホールド: 現在のピースとホールドピースを交換
 			currentPieceCopy := &tetris.Piece{
 				Type:     state.CurrentPiece.Type,
 				X:        state.CurrentPiece.X,
 				Y:        state.CurrentPiece.Y,
 				Rotation: state.CurrentPiece.Rotation,
+				ScoreData: make(map[string]int), // ScoreDataマップを初期化
 			}
+			
+			// ScoreDataを深いコピー
+			if state.CurrentPiece.ScoreData != nil {
+				for key, value := range state.CurrentPiece.ScoreData {
+					currentPieceCopy.ScoreData[key] = value
+				}
+			}
+			
 			// ホールドピースを現在のピースとして設定
 			state.CurrentPiece = state.HeldPiece
-			// テトリミノの種類に応じた適切な初期位置を設定
-			switch state.CurrentPiece.Type {
-			case tetris.TypeI:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-				state.CurrentPiece.Y = -1
-			case tetris.TypeO:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = 0
-			case tetris.TypeL:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = 0
-			default:
-				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-				state.CurrentPiece.Y = -1
+			
+			// 安全性チェック
+			if state.CurrentPiece == nil {
+				log.Printf("[ERROR] HeldPiece is nil during hold swap for user %s", state.UserID)
+				state.CurrentPiece = state.GetNextPieceFromQueue()
+				state.NextPiece = state.GetNextPieceFromQueue()
+			} else {
+				// テトリミノの種類に応じた適切な初期位置を設定
+				switch state.CurrentPiece.Type {
+				case tetris.TypeI:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 2
+					state.CurrentPiece.Y = 1
+				case tetris.TypeO:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				case tetris.TypeL:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				default:
+					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+					state.CurrentPiece.Y = 1
+				}
+				state.CurrentPiece.Rotation = 0
 			}
-			state.CurrentPiece.Rotation = 0
+			
 			// 現在のピースのコピーをホールドピースとして設定
 			state.HeldPiece = currentPieceCopy
 			moved = true
 		}
 
 		// ホールド後のピースが衝突する場合はゲームオーバー
-		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+		if state.CurrentPiece != nil && state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+			log.Printf("[INFO] Game over after hold for user %s - piece collision", state.UserID)
 			state.IsGameOver = true
 		}
 	}
+
+	// ピースが移動・回転した場合、現在のピースのスコア情報を更新
+	if moved && state.CurrentPiece != nil {
+		state.updateCurrentPieceScores()
+	}
+
 	return moved
 }
 
@@ -188,23 +224,29 @@ func AutoFall(state *PlayerGameState) bool {
 		return false
 	}
 
-	// 落下間隔が経過していない場合は何もしない
-	if time.Since(state.lastFallTime) < GetFallInterval(state.Level) {
-		return false
+	// 落下間隔の計算（レベルに基づく）
+	fallInterval := GetFallInterval(state.Level)
+	
+	if time.Since(state.lastFallTime) >= fallInterval {
+		// 下に移動可能かチェック
+		if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
+			// 落下
+			state.CurrentPiece.Y++
+			state.lastFallTime = time.Now()
+			
+			// 現在のピースのスコア情報を更新
+			state.updateCurrentPieceScores()
+			
+			return true
+		} else {
+			// 着地：ピースを固定して次のピースをスポーン
+			state.Board.MergePiece(state.CurrentPiece)
+			handlePieceLock(state)
+			state.lastFallTime = time.Now()
+			return false
+		}
 	}
-
-	// ピースが下に衝突するかどうかをチェック
-	if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
-		state.CurrentPiece.Y++ // 衝突しないので下に移動
-		state.lastFallTime = time.Now() // 落下時間を更新
-		return true // 落下した
-	} else {
-		// ピースが着地した
-		state.Board.MergePiece(state.CurrentPiece) // ボードに固定
-		handlePieceLock(state)                     // 固定後の処理
-		state.lastFallTime = time.Now()            // 落下時間をリセット
-		return false // 着地した
-	}
+	return false
 }
 
 // handlePieceLock はピースがボードに固定された後の処理をすべて行います。
@@ -213,8 +255,11 @@ func AutoFall(state *PlayerGameState) bool {
 // Parameters:
 //   state : 更新するプレイヤーのゲーム状態のポインタ
 func handlePieceLock(state *PlayerGameState) {
+	// ピースのスコアデータをContributionScoresに反映
+	updateContributionScoresFromPiece(state, state.CurrentPiece)
+
 	// ラインクリア判定とスコア加算
-	clearedLines, lineClearScore := state.Board.ClearLines(state.contributionScores)
+	clearedLines, lineClearScore := state.Board.ClearLines(state.ContributionScores)
 	state.LinesCleared += clearedLines
 	state.Score += lineClearScore // ラインクリアによるスコア加算
 
@@ -243,6 +288,39 @@ func handlePieceLock(state *PlayerGameState) {
 		log.Printf("Player %s Game Over! Final Score: %d, Lines Cleared: %d", state.UserID, state.Score, state.LinesCleared)
 		// TODO: GameSessionManager にゲームオーバーを通知し、セッションを終了する
 		// 例: sessionManager.EndGameSession(state.RoomID)
+	}
+}
+
+// updateContributionScoresFromPiece はピースのスコアデータをPlayerGameStateのContributionScoresに反映します。
+//
+// Parameters:
+//   state : 更新するプレイヤーのゲーム状態
+//   piece : スコアデータを含むピース
+func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Piece) {
+	if piece == nil || piece.ScoreData == nil {
+		return
+	}
+
+	// ピースの各ブロックについて、ボード上の位置にスコアを設定
+	for _, block := range piece.Blocks() {
+		boardX := piece.X + block[0]
+		boardY := piece.Y + block[1]
+
+		// ボードの有効な範囲内のみ処理
+		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
+			scoreKey := fmt.Sprintf("%d_%d", boardY, boardX)
+			
+			// ピース内の相対位置を計算
+			relativeX := block[0]
+			relativeY := block[1]
+			
+			// 現在の回転状態での位置キーを作成
+			rotationKey := fmt.Sprintf("rot_%d_%d_%d", piece.Rotation, relativeX, relativeY)
+			
+			if score, exists := piece.ScoreData[rotationKey]; exists && score > 0 {
+				state.ContributionScores[scoreKey] = score
+			}
+		}
 	}
 }
 

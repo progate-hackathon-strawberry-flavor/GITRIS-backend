@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -48,10 +52,8 @@ func main() {
 	deckService := services.NewDeckService(databaseService.DB, deckRepo)
 
 	// テトリスゲームのセッションマネージャーを初期化
-	sessionManager := tetris.NewSessionManager(databaseService)
-	
-	// SessionManagerのメインループをゴルーチンで開始
-	go sessionManager.Run()
+	sessionManager := tetris.NewSessionManager(databaseService, deckRepo)
+	// SessionManager.Run()はNewSessionManager内で既に開始されているため、重複実行を回避
 
 	// ハンドラ層の初期化
 	contributionHandler := api.NewContributionHandler(githubService, databaseService)
@@ -110,6 +112,15 @@ func main() {
 		port = "8080"
 	}
 
+	// HTTPサーバーの設定
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+		ReadHeaderTimeout: 30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
 	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
@@ -117,7 +128,33 @@ func main() {
 	fmt.Printf("デッキを保存するには、認証トークンと以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/protected/deck/save\n", port)
 	fmt.Printf("テトリスゲームのテストクライアント: http://localhost:%s/test_websocket_client.html\n", port)
 
+	// シャットダウンシグナルの待機用チャネル
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// HTTPサーバーの起動
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	// サーバーを別のGoroutineで起動
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("サーバーの起動に失敗しました: %v", err)
+		}
+	}()
+
+	log.Println("サーバーが正常に起動しました。終了するには Ctrl+C を押してください。")
+
+	// シャットダウンシグナルを待機
+	<-quit
+	log.Println("サーバーをシャットダウンしています...")
+
+	// SessionManagerを先にシャットダウン
+	sessionManager.Shutdown()
+
+	// グレースフルシャットダウンの実行
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("サーバーのシャットダウン中にエラーが発生しました: %v", err)
+	}
+
+	log.Println("サーバーが正常にシャットダウンされました。")
 }

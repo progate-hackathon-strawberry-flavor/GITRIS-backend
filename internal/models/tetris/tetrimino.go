@@ -21,6 +21,7 @@ type Piece struct {
 	X        int       `json:"x"`         // ボード上のX座標
 	Y        int       `json:"y"`         // ボード上のY座標
 	Rotation int       `json:"rotation"`  // 回転角度 (0, 90, 180, 270 度)
+	ScoreData map[string]int `json:"-"`  // 各ブロックのスコア情報 "relativeX_relativeY": score - JSONシリアライズから除外
 	// TODO: GITRISのデッキシステムを考慮すると、ピース内の各ブロックに
 	// Contributionスコアや元々のGitHub草の座標を紐付ける必要があるかもしれません。
 	// 現状では Board.ClearLines で仮のスコアを使用していますが、
@@ -79,8 +80,18 @@ var pieceShapes = map[PieceType][][][2]int{
 // Returns:
 //   [][2]int: 各ブロックの相対座標の配列。例: {{x1, y1}, {x2, y2}, ...}
 func (p *Piece) Blocks() [][2]int {
+	return p.GetBlocksAtRotation(p.Rotation)
+}
+
+// GetBlocksAtRotation は指定された回転角度でのブロックの相対座標の配列を返します。
+//
+// Parameters:
+//   rotation : 回転角度 (0, 90, 180, 270)
+// Returns:
+//   [][2]int: 各ブロックの相対座標の配列
+func (p *Piece) GetBlocksAtRotation(rotation int) [][2]int {
 	shapeData := pieceShapes[p.Type]
-	rotIdx := p.Rotation / 90 // 0, 1, 2, 3 のインデックスに変換
+	rotIdx := rotation / 90 // 0, 1, 2, 3 のインデックスに変換
 
 	// Oミノは回転しないので常に0番目の形状を使用
 	if p.Type == TypeO {
@@ -119,4 +130,48 @@ func (p *Piece) RotateCounterClockwise() {
 func (p *Piece) Clone() *Piece {
 	newP := *p // ポインタが指す先の値をコピー
 	return &newP
+}
+
+// StringToPieceType は文字列のテトリミノタイプ（"I", "O", "T"など）をPieceTypeに変換します。
+func StringToPieceType(s string) (PieceType, bool) {
+	switch s {
+	case "I":
+		return TypeI, true
+	case "O":
+		return TypeO, true
+	case "T":
+		return TypeT, true
+	case "S":
+		return TypeS, true
+	case "Z":
+		return TypeZ, true
+	case "J":
+		return TypeJ, true
+	case "L":
+		return TypeL, true
+	default:
+		return TypeI, false // デフォルト値とfalseを返す
+	}
+}
+
+// PieceTypeToString はPieceTypeを文字列表現に変換します。
+func PieceTypeToString(t PieceType) string {
+	switch t {
+	case TypeI:
+		return "I"
+	case TypeO:
+		return "O"
+	case TypeT:
+		return "T"
+	case TypeS:
+		return "S"
+	case TypeZ:
+		return "Z"
+	case TypeJ:
+		return "J"
+	case TypeL:
+		return "L"
+	default:
+		return "I" // デフォルト値
+	}
 }

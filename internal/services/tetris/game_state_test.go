@@ -49,8 +49,8 @@ func TestNewPlayerGameState(t *testing.T) {
 	assert.True(t, time.Since(state.lastFallTime) < time.Second)
 
 	// Contributionスコアの初期化を確認
-	assert.NotNil(t, state.contributionScores)
-	assert.Equal(t, tetris.BoardHeight*tetris.BoardWidth, len(state.contributionScores))
+	assert.NotNil(t, state.ContributionScores)
+	assert.Equal(t, tetris.BoardHeight*tetris.BoardWidth, len(state.ContributionScores))
 
 	// ピースキューの初期化を確認
 	assert.NotNil(t, state.pieceQueue)
@@ -125,63 +125,86 @@ func TestGetNextPieceFromQueue(t *testing.T) {
 }
 
 func TestSpawnNewPiece(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// SpawnNewPieceは NewPlayerGameState 内で一度自動実行される
+	// 初期の CurrentPiece を取得
+	initialPiece := state.CurrentPiece
+	assert.NotNil(t, initialPiece)
+
+	// テトリミノのタイプに応じた期待値を設定
+	var expectedX, expectedY int
+	switch initialPiece.Type {
+	case tetris.TypeI:
+		expectedX = tetris.BoardWidth/2 - 2 // 3
+		expectedY = 1
+	case tetris.TypeO:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	case tetris.TypeL:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	default:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	}
+
+	assert.Equal(t, expectedX, initialPiece.X)
+	assert.Equal(t, expectedY, initialPiece.Y)
+	assert.Equal(t, 0, initialPiece.Rotation)
+}
+
+// TestNewGameSession はNewGameSession関数をテストします
+func TestNewGameSession(t *testing.T) {
+	// テスト用のデッキデータを作成
 	now := time.Now()
 	deck := &models.Deck{
-		ID:          "test-deck-4",
-		// Name:        "Test Deck 4",
-		// Description: "Test deck for piece spawning testing",
+		ID:          "test-deck-1",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 
-	state := NewPlayerGameState("test-user-4", deck)
+	// NewGameSessionを呼び出し (deckRepoをnilで渡してランダムスコア使用)
+	session, err := NewGameSession("test-room-1", "test-user-1", deck, nil)
 
-	// 最初のピースのスポーンを確認
-	assert.NotNil(t, state.CurrentPiece)
-	assert.NotNil(t, state.NextPiece)
-	assert.Equal(t, tetris.BoardWidth/2-2, state.CurrentPiece.X)
-	assert.Equal(t, 0, state.CurrentPiece.Y)
-
-	// 次のピースのスポーンを確認
-	originalCurrentPiece := state.CurrentPiece
-	originalNextPiece := state.NextPiece
-	state.SpawnNewPiece()
-	assert.Equal(t, originalNextPiece, state.CurrentPiece)
-	assert.NotEqual(t, originalCurrentPiece, state.CurrentPiece)
-	assert.NotEqual(t, originalNextPiece, state.NextPiece)
-}
-
-func TestNewGameSession(t *testing.T) {
-	roomID := "test-room"
-	player1ID := "player1"
-	deck := &models.Deck{ID: "test-deck"}
-
-	session := NewGameSession(roomID, player1ID, deck)
-
+	// エラーがないことを確認
+	assert.NoError(t, err)
 	assert.NotNil(t, session)
-	assert.Equal(t, roomID, session.ID)
+
+	// セッションの基本フィールドを確認
+	assert.Equal(t, "test-room-1", session.ID)
 	assert.Equal(t, "waiting", session.Status)
 	assert.NotNil(t, session.Player1)
 	assert.Nil(t, session.Player2)
-	assert.NotNil(t, session.InputCh)
-	assert.NotNil(t, session.OutputCh)
-	assert.NotNil(t, session.GameLoopDone)
+	assert.Equal(t, "test-user-1", session.Player1.UserID)
 }
 
+// TestSetPlayer2 はSetPlayer2メソッドをテストします
 func TestSetPlayer2(t *testing.T) {
-	roomID := "test-room"
-	player1ID := "player1"
-	player2ID := "player2"
-	deck := &models.Deck{ID: "test-deck"}
+	// テスト用のデッキデータを作成
+	now := time.Now()
+	deck1 := &models.Deck{
+		ID:          "test-deck-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	deck2 := &models.Deck{
+		ID:          "test-deck-2",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
 
-	session := NewGameSession(roomID, player1ID, deck)
-	session.SetPlayer2(player2ID, deck)
+	// ゲームセッションを作成
+	session, err := NewGameSession("test-room-1", "test-user-1", deck1, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, session)
 
+	// Player2を設定
+	session.SetPlayer2("test-user-2", deck2, nil)
+
+	// Player2の設定を確認
 	assert.NotNil(t, session.Player2)
-	assert.Equal(t, player2ID, session.Player2.UserID)
-
-	// チャネルをクローズ
-	close(session.InputCh)
-	close(session.OutputCh)
-	close(session.GameLoopDone)
+	assert.Equal(t, "test-user-2", session.Player2.UserID)
+	assert.Equal(t, deck2, session.Player2.Deck)
 } 

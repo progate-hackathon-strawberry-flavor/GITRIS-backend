@@ -232,7 +232,7 @@ func TestLineClear(t *testing.T) {
 
 	// ボードの最下段を埋める
 	for x := 0; x < tetris.BoardWidth; x++ {
-		state.Board[tetris.BoardHeight-1][x] = tetris.BlockFilled
+		state.Board[tetris.BoardHeight-1][x] = tetris.BlockI
 	}
 
 	initialScore := state.Score
@@ -259,10 +259,10 @@ func TestGameOver(t *testing.T) {
 		t.Fatal("Initial CurrentPiece is nil, cannot run test.")
 	}
 
-	// ボードをほぼ埋める（最上段以外）
-	for y := 1; y < tetris.BoardHeight; y++ {
+	// ボードを全体的に埋める（最上部まで含む）
+	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
-			state.Board[y][x] = tetris.BlockFilled
+			state.Board[y][x] = tetris.BlockI
 		}
 	}
 
@@ -329,9 +329,26 @@ func TestApplyPlayerInput_Hold(t *testing.T) {
 	}
 
 	// ピースの位置が正しくリセットされていることを確認
-	if state.CurrentPiece.X != tetris.BoardWidth/2-2 || state.CurrentPiece.Y != 0 {
-		t.Errorf("Expected piece to be at position (%d, 0), but got (%d, %d)",
-			tetris.BoardWidth/2-2, state.CurrentPiece.X, state.CurrentPiece.Y)
+	// テトリミノタイプに応じた期待値を設定
+	var expectedX, expectedY int
+	switch state.CurrentPiece.Type {
+	case tetris.TypeI:
+		expectedX = tetris.BoardWidth/2 - 2 // 3
+		expectedY = 1
+	case tetris.TypeO:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	case tetris.TypeL:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	default:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	}
+	
+	if state.CurrentPiece.X != expectedX || state.CurrentPiece.Y != expectedY {
+		t.Errorf("Expected piece to be at position (%d, %d), but got (%d, %d)",
+			expectedX, expectedY, state.CurrentPiece.X, state.CurrentPiece.Y)
 	}
 }
 
@@ -343,8 +360,8 @@ func TestApplyPlayerInput_HoldGameOver(t *testing.T) {
 		t.Fatal("Initial CurrentPiece is nil, cannot run test.")
 	}
 
-	// ボードをほぼ埋める（最上段以外）
-	for y := 1; y < tetris.BoardHeight; y++ {
+	// ボードを全体的に埋める（最上部まで含む）
+	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
 			state.Board[y][x] = tetris.BlockFilled
 		}

@@ -63,6 +63,17 @@
         .cell.type-4 { background: #e74c3c; } /* Z - 赤 */
         .cell.type-5 { background: #3498db; } /* J - 青 */
         .cell.type-6 { background: #f39c12; } /* L - オレンジ */
+        .cell.type-7 { background: #95a5a6; } /* Filled - グレー */
+        .cell.type-8 { background: #7f8c8d; } /* Garbage - ダークグレー */
+        
+        /* スコアベースの色強度 */
+        .cell.score-low { filter: brightness(0.6); }      /* 100-199: 暗め */
+        .cell.score-medium { filter: brightness(0.8); }   /* 200-299: 標準より少し暗め */
+        .cell.score-high { filter: brightness(1.0); }     /* 300-399: 標準 */
+        .cell.score-very-high { 
+            filter: brightness(1.3) saturate(1.2); 
+            box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+        } /* 400-499: 明るく光る */
         
         .cell.current {
             box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
@@ -103,6 +114,7 @@
         .game-info {
             display: grid;
             grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
             gap: 10px;
             margin: 10px 0;
         }
@@ -246,6 +258,34 @@
             height: 15px;
             background: #111;
         }
+        
+        .score-info {
+            margin: 10px 0;
+            text-align: center;
+        }
+        .score-info h4 {
+            margin: 5px 0;
+            color: #999;
+            font-size: 12px;
+        }
+        .score-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .score-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 10px;
+            color: #ccc;
+        }
+        .score-demo {
+            width: 12px;
+            height: 12px;
+            background: #4ecdc4; /* デフォルト色 */
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -296,6 +336,10 @@
                         <div class="label">ゲームオーバー</div>
                         <div class="value" id="player1GameOver">-</div>
                     </div>
+                    <div class="info-box">
+                        <div class="label">予想スコア</div>
+                        <div class="value" id="player1PieceScore">-</div>
+                    </div>
                 </div>
                 
                 <div class="next-piece">
@@ -306,6 +350,28 @@
                 <div class="hold-piece">
                     <h4>Hold</h4>
                     <div class="mini-board" id="player1Hold"></div>
+                </div>
+                
+                <div class="score-info">
+                    <h4>スコアガイド</h4>
+                    <div class="score-legend">
+                        <div class="score-item">
+                            <div class="score-demo score-low"></div>
+                            <span>100-199pt (低)</span>
+                        </div>
+                        <div class="score-item">
+                            <div class="score-demo score-medium"></div>
+                            <span>200-299pt (中)</span>
+                        </div>
+                        <div class="score-item">
+                            <div class="score-demo score-high"></div>
+                            <span>300-399pt (高)</span>
+                        </div>
+                        <div class="score-item">
+                            <div class="score-demo score-very-high"></div>
+                            <span>400-499pt (最高)</span>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -331,6 +397,10 @@
                     <div class="info-box">
                         <div class="label">ゲームオーバー</div>
                         <div class="value" id="player2GameOver">-</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">予想スコア</div>
+                        <div class="value" id="player2PieceScore">-</div>
                     </div>
                 </div>
                 
@@ -506,8 +576,46 @@
         // ボードキャッシュ - パフォーマンス改善のため
         const boardCache = {};
         
-        // テトリスボードの描画（パフォーマンス最適化版）
-        function drawTetrisBoard(boardId, boardData, currentPiece = null) {
+        // スコアに応じた色クラスを取得する関数
+        function getScoreClass(score) {
+            if (score >= 400) return 'score-very-high';
+            if (score >= 300) return 'score-high';
+            if (score >= 200) return 'score-medium';
+            return 'score-low';
+        }
+        
+        // 現在のピースの予想スコアを計算する関数
+        function calculatePieceScore(currentPiece, contributionScores) {
+            if (!currentPiece || !contributionScores || 
+                typeof currentPiece.x !== 'number' || 
+                typeof currentPiece.y !== 'number' || 
+                typeof currentPiece.type !== 'number') {
+                return 0;
+            }
+            
+            const pieceBlocks = getPieceBlocks(currentPiece.type, currentPiece.rotation || 0);
+            let totalScore = 0;
+            let blockCount = 0;
+            
+            for (const block of pieceBlocks) {
+                const boardRow = currentPiece.y + block[1];
+                const boardCol = currentPiece.x + block[0];
+                
+                if (boardRow >= 0 && boardRow < 20 && boardCol >= 0 && boardCol < 10) {
+                    const scoreKey = `${boardRow}_${boardCol}`;
+                    const score = contributionScores[scoreKey];
+                    if (score !== undefined) {
+                        totalScore += score;
+                        blockCount++;
+                    }
+                }
+            }
+            
+            return blockCount > 0 ? Math.round(totalScore) : 0;
+        }
+        
+        // テトリスボードの描画（スコアベース色分け対応版）
+        function drawTetrisBoard(boardId, boardData, currentPiece = null, contributionScores = null, currentPieceScores = null) {
             const boardElement = document.getElementById(boardId);
             if (!boardElement) return;
             
@@ -537,7 +645,7 @@
                 }
             }
             
-            // ボードデータを適用
+            // ボードデータを適用（スコアベースの色分けも含む）
             if (boardData && Array.isArray(boardData)) {
                 for (let row = 0; row < Math.min(20, boardData.length); row++) {
                     if (Array.isArray(boardData[row])) {
@@ -546,13 +654,22 @@
                             if (cellValue && cellValue > 0) {
                                 // BlockType (1-7) を PieceType (0-6) に変換
                                 cells[row][col].classList.add(`type-${cellValue - 1}`);
+                                
+                                // スコアベースの色分けを適用
+                                if (contributionScores) {
+                                    const scoreKey = `${row}_${col}`;
+                                    const score = contributionScores[scoreKey];
+                                    if (score !== undefined) {
+                                        cells[row][col].classList.add(getScoreClass(score));
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
             
-            // 現在のピースを描画
+            // 現在のピースを描画（スコアベースの色分けも含む）
             if (currentPiece && typeof currentPiece.x === 'number' && typeof currentPiece.y === 'number' && typeof currentPiece.type === 'number') {
                 const pieceBlocks = getPieceBlocks(currentPiece.type, currentPiece.rotation || 0);
                 
@@ -564,6 +681,22 @@
                         cells[boardRow][boardCol].classList.add('current');
                         // PieceType (0-6) をそのまま使用
                         cells[boardRow][boardCol].classList.add(`type-${currentPiece.type}`);
+                        
+                        // 現在のピースには専用のスコアデータを使用（より正確）
+                        if (currentPieceScores) {
+                            const scoreKey = `${boardRow}_${boardCol}`;
+                            const score = currentPieceScores[scoreKey];
+                            if (score !== undefined) {
+                                cells[boardRow][boardCol].classList.add(getScoreClass(score));
+                            }
+                        } else if (contributionScores) {
+                            // フォールバック: 従来のcontributionScoresを使用
+                            const scoreKey = `${boardRow}_${boardCol}`;
+                            const score = contributionScores[scoreKey];
+                            if (score !== undefined) {
+                                cells[boardRow][boardCol].classList.add(getScoreClass(score));
+                            }
+                        }
                     }
                 }
             }
@@ -879,11 +1012,11 @@
         // ゲーム状態のキャッシュ（重複更新を避けるため）
         let lastGameStateUpdate = 0;
         
-        // ゲーム状態の更新（パフォーマンス最適化版）
+        // ゲーム状態の更新（さらに軽量化）
         function updateGameState(data) {
-            // 更新頻度を制限（60fps制限）
+            // 更新頻度を制限（10fps制限 - 相手の動きは1秒おきなので十分）
             const now = Date.now();
-            if (now - lastGameStateUpdate < 16) { // 約60fps
+            if (now - lastGameStateUpdate < 100) { // 約10fps
                 return;
             }
             lastGameStateUpdate = now;
@@ -905,8 +1038,12 @@
                 document.getElementById('player1Lines').textContent = data.player1.lines_cleared || 0;
                 document.getElementById('player1GameOver').textContent = data.player1.is_game_over ? 'YES' : 'NO';
                 
-                // プレイヤー1のボード描画
-                drawTetrisBoard('player1Board', data.player1.board, data.player1.current_piece);
+                // プレイヤー1のボード描画（スコア情報も含む）
+                drawTetrisBoard('player1Board', data.player1.board, data.player1.current_piece, data.player1.contribution_scores, data.player1.current_piece_scores);
+                
+                // 予想スコア計算・表示
+                const player1PieceScore = calculatePieceScore(data.player1.current_piece, data.player1.contribution_scores);
+                document.getElementById('player1PieceScore').textContent = player1PieceScore > 0 ? player1PieceScore : '-';
                 
                 // Next/Holdピース描画
                 drawMiniBoard('player1Next', data.player1.next_piece);
@@ -926,8 +1063,12 @@
                 document.getElementById('player2Lines').textContent = data.player2.lines_cleared || 0;
                 document.getElementById('player2GameOver').textContent = data.player2.is_game_over ? 'YES' : 'NO';
                 
-                // プレイヤー2のボード描画
-                drawTetrisBoard('player2Board', data.player2.board, data.player2.current_piece);
+                // プレイヤー2のボード描画（スコア情報も含む）
+                drawTetrisBoard('player2Board', data.player2.board, data.player2.current_piece, data.player2.contribution_scores, data.player2.current_piece_scores);
+                
+                // 予想スコア計算・表示
+                const player2PieceScore = calculatePieceScore(data.player2.current_piece, data.player2.contribution_scores);
+                document.getElementById('player2PieceScore').textContent = player2PieceScore > 0 ? player2PieceScore : '-';
                 
                 // Next/Holdピース描画
                 drawMiniBoard('player2Next', data.player2.next_piece);

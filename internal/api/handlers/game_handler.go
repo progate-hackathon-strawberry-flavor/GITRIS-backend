@@ -20,8 +20,8 @@ import (
 // CheckOrigin はクロスオリジンリクエストを許可するかどうかを制御します。
 // 開発中は true で良いですが、本番環境では適切な Origin チェックを行うべきです。
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  4096,  // 読み取りバッファを4KBに増加
+	WriteBufferSize: 4096,  // 書き込みバッファを4KBに増加
 	CheckOrigin: func(r *http.Request) bool {
 		// すべてのOriginからの接続を許可 (開発用)
 		// 本番環境では、フロントエンドのドメインなどを厳密にチェックしてください。
@@ -350,13 +350,8 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 
 	log.Printf("[GameHandler] Successfully registered client %s to room %s", userID, roomID)
 	
-	// ゲーム開始条件をチェック
-	log.Printf("[GameHandler] Checking game start conditions for room %s", roomID)
-	go func() {
-		// ちょっと待ってからチェック（RegisterClientの処理が完了するのを待つ）
-		time.Sleep(100 * time.Millisecond)
-		h.sessionManager.CheckAndStartGame(roomID)
-	}()
+	// ゲーム開始条件のチェックはSessionManager.Register内で自動実行されるため、ここでは不要
+	log.Printf("[GameHandler] Client registration completed for room %s", roomID)
 
 	// RegisterClient内で readPump と writePump ゴルーチンが開始されるため、
 	// ここではそれ以上の処理は不要です。ハンドラーは単にコネクションを引き渡すだけです。

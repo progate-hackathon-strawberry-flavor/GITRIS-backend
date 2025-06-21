@@ -24,7 +24,8 @@ const (
 	BlockZ                       // 5: Z-テトリミノ由来のブロック (PieceType 4 + 1)
 	BlockJ                       // 6: J-テトリミノ由来のブロック (PieceType 5 + 1)
 	BlockL                       // 7: L-テトリミノ由来のブロック (PieceType 6 + 1)
-	BlockGarbage                 // 8: お邪魔ブロック
+	BlockFilled                  // 8: 固定ブロック（テスト用など）
+	BlockGarbage                 // 9: お邪魔ブロック
 )
 
 // Board はテトリスのゲームボードを表す2次元配列です。
