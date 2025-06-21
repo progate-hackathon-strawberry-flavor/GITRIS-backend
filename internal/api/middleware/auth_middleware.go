@@ -2,11 +2,14 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -29,13 +32,19 @@ func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
 // AuthMiddleware is a middleware function that checks for a valid JWT token.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// テスト用: 環境変数で認証をバイパス可能にする
-		if os.Getenv("BYPASS_AUTH") == "true" {
-			// テスト用のユーザーIDを設定
-			ctx := context.WithValue(r.Context(), UserIDKey{}, "test-user-123")
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
+			// テスト用: 環境変数で認証をバイパス可能にする
+	if os.Getenv("BYPASS_AUTH") == "true" {
+		// テスト用のユニークなUserIDを生成（リクエストの詳細情報を含む）
+		randBytes := make([]byte, 4)
+		rand.Read(randBytes)
+		requestInfo := fmt.Sprintf("%s-%s", r.Method, r.URL.Path)
+		testUserID := fmt.Sprintf("test-user-%d-%s", time.Now().UnixNano(), hex.EncodeToString(randBytes))
+		log.Printf("AuthMiddleware: Generated unique test user: %s for %s", testUserID, requestInfo)
+		
+		ctx := context.WithValue(r.Context(), UserIDKey{}, testUserID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+		return
+	}
 
 		// 1. authorizationヘッダーからJWTを取得
 		authHeader := r.Header.Get("Authorization")
