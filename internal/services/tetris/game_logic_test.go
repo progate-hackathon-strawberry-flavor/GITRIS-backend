@@ -526,3 +526,50 @@ func TestUpdateContributionScoresFromPiece_OutOfBounds(t *testing.T) {
 		}
 	}
 }
+
+// TestApplyPlayerInput_GameOverIgnored はゲームオーバーしたプレイヤーの操作が無視されることをテストします。
+func TestApplyPlayerInput_GameOverIgnored(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+	
+	// プレイヤーをゲームオーバー状態にする
+	state.IsGameOver = true
+	
+	// 初期状態を記録
+	initialX := state.CurrentPiece.X
+	initialY := state.CurrentPiece.Y
+	initialRotation := state.CurrentPiece.Rotation
+	initialScore := state.Score
+	
+	// 各種操作を試行
+	actions := []string{"move_left", "move_right", "rotate", "soft_drop", "hard_drop", "hold"}
+	
+	for _, action := range actions {
+		// 操作を実行
+		moved := ApplyPlayerInput(state, action)
+		
+		// ゲームオーバー状態では操作が無視されることを確認
+		if moved {
+			t.Errorf("Expected action '%s' to be ignored for game over player, but it was processed", action)
+		}
+		
+		// 状態が変更されていないことを確認
+		if state.CurrentPiece.X != initialX {
+			t.Errorf("Expected piece X to remain %d after action '%s', but got %d", initialX, action, state.CurrentPiece.X)
+		}
+		if state.CurrentPiece.Y != initialY {
+			t.Errorf("Expected piece Y to remain %d after action '%s', but got %d", initialY, action, state.CurrentPiece.Y)
+		}
+		if state.CurrentPiece.Rotation != initialRotation {
+			t.Errorf("Expected piece rotation to remain %d after action '%s', but got %d", initialRotation, action, state.CurrentPiece.Rotation)
+		}
+		if state.Score != initialScore {
+			t.Errorf("Expected score to remain %d after action '%s', but got %d", initialScore, action, state.Score)
+		}
+	}
+	
+	// ゲームオーバー状態が維持されていることを確認
+	if !state.IsGameOver {
+		t.Error("Expected player to remain in game over state")
+	}
+}

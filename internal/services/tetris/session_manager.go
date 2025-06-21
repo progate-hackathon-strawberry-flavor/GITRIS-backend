@@ -213,6 +213,12 @@ func (sm *SessionManager) Run() {
 				continue
 			}
 
+			// ゲームオーバーしたプレイヤーの操作は無視
+			if targetPlayerState.IsGameOver {
+				log.Printf("[SessionManager] Ignoring input from game over player %s", event.UserID)
+				continue
+			}
+
 			// ゲームロジックを適用し、状態が実際に変更されたか確認
 			if ApplyPlayerInput(targetPlayerState, event.Action) {
 				// 自分の操作は即座に自分にだけ送信（レスポンシブ感を維持）
@@ -228,10 +234,8 @@ func (sm *SessionManager) Run() {
 					// ゲームオーバーは重要なので即座にブロードキャスト
 					go func(passcode string) {
 						sm.BroadcastGameState(passcode)
-						// ゲーム結果をクライアントが受信する時間を確保するため、少し遅延してからセッション終了
-						time.Sleep(2 * time.Second)
-						sm.EndGameSession(passcode)
 					}(session.ID)
+					log.Printf("[SessionManager] Player %s is game over, but game continues for the other player", event.UserID)
 				}
 			}
 
@@ -269,9 +273,11 @@ func (sm *SessionManager) Run() {
 					sm.BroadcastGameState(roomID)
 				}(session.ID)
 
-				// ゲームオーバー判定 (自動落下でゲームオーバーになることもありえる)
-				if (session.Player1 != nil && session.Player1.IsGameOver) || (session.Player2 != nil && session.Player2.IsGameOver) {
-					// 自動落下でのゲームオーバーも遅延してセッション終了
+				// ゲームオーバー判定 - 両方のプレイヤーがゲームオーバーした場合のみ終了
+				if session.Player1 != nil && session.Player2 != nil && 
+				   session.Player1.IsGameOver && session.Player2.IsGameOver {
+					// 両プレイヤーがゲームオーバーした場合のみセッション終了
+					log.Printf("[SessionManager] Both players are game over, ending session %s", session.ID)
 					go func(sessionID string) {
 						time.Sleep(2 * time.Second)
 						sm.EndGameSession(sessionID)
