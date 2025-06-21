@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GITRIS WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .game-area {
+            flex: 1;
+            border: 2px solid #333;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .controls {
+            flex: 1;
+            border: 2px solid #333;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(10, 20px);
+            grid-template-rows: repeat(20, 20px);
+            gap: 1px;
+            background: #333;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .cell {
+            width: 20px;
+            height: 20px;
+            background: #fff;
+            border: 1px solid #ccc;
+        }
+        .cell.filled {
+            background: #007bff;
+        }
+        .cell.current {
+            background: #28a745;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+        }
+        .log {
+            height: 200px;
+            overflow-y: auto;
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>GITRIS WebSocket Test Client</h1>
+    
+    <div class="container">
+        <div class="game-area">
+            <h2>ゲーム画面</h2>
+            <div>
+                <h3>ゲーム状態</h3>
+                <p>接続状態: <span id="connectionStatus" style="color: red;">未接続</span></p>
+                <p>ゲーム状態: <span id="gameStatus">待機中</span></p>
+                <p>プレイヤー1: <span id="player1Status">未参加</span></p>
+                <p>プレイヤー2: <span id="player2Status">未参加</span></p>
+            </div>
+            <div class="board" id="gameBoard"></div>
+            <div>
+                <p>スコア: <span id="score">0</span></p>
+                <p>レベル: <span id="level">1</span></p>
+                <p>ライン: <span id="lines">0</span></p>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <h2>コントロール</h2>
+            
+            <div>
+                <h3>接続設定</h3>
+                <input type="text" id="serverUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
+                <input type="text" id="roomId" placeholder="ルームID">
+                <input type="text" id="userId" placeholder="ユーザーID">
+                <input type="text" id="authToken" placeholder="認証トークン (Bearer ...)" style="width: 300px;">
+                <br>
+                <button onclick="connect()">接続</button>
+                <button onclick="disconnect()">切断</button>
+            </div>
+            
+            <div>
+                <h3>ゲーム操作</h3>
+                <button onclick="sendAction('move_left')">← 左</button>
+                <button onclick="sendAction('move_right')">右 →</button>
+                <br>
+                <button onclick="sendAction('rotate')">回転</button>
+                <button onclick="sendAction('soft_drop')">ソフトドロップ</button>
+                <button onclick="sendAction('hard_drop')">ハードドロップ</button>
+                <button onclick="sendAction('hold')">ホールド</button>
+            </div>
+            
+            <div>
+                <h3>ルーム操作</h3>
+                <button onclick="createRoom()">ルーム作成</button>
+                <button onclick="joinRoom()">ルーム参加</button>
+            </div>
+            
+            <div>
+                <h3>ログ</h3>
+                <div class="log" id="log"></div>
+                <button onclick="clearLog()">ログクリア</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let gameState = null;
+        
+        // ログ出力
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // WebSocket接続
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const roomId = document.getElementById('roomId').value;
+            const userId = document.getElementById('userId').value;
+            const authToken = document.getElementById('authToken').value;
+            
+            if (!roomId || !userId) {
+                alert('ルームIDとユーザーIDを入力してください');
+                return;
+            }
+            
+            // WebSocket URL（クエリパラメータなし）
+            let wsUrl = `${serverUrl.replace('http', 'ws')}/api/game/ws/${roomId}`;
+            
+            log(`WebSocket接続を試行中: ${wsUrl}`);
+            
+            // WebSocket接続を作成
+            socket = new WebSocket(wsUrl);
+            
+            // 接続確立後にAuthorizationヘッダーを送信
+            socket.onopen = function(event) {
+                log('WebSocket接続が確立されました');
+                document.getElementById('connectionStatus').textContent = '接続済み';
+                document.getElementById('connectionStatus').style.color = 'green';
+                
+                // Authorizationヘッダーを送信
+                if (authToken) {
+                    const authMessage = {
+                        type: 'auth',
+                        token: authToken
+                    };
+                    socket.send(JSON.stringify(authMessage));
+                    log(`認証メッセージを送信: ${authToken.substring(0, 20)}...`);
+                } else {
+                    log('認証トークンが設定されていません');
+                }
+            };
+            
+            socket.onmessage = function(event) {
+                log(`受信: ${event.data}`);
+                try {
+                    const data = JSON.parse(event.data);
+                    handleGameMessage(data);
+                } catch (e) {
+                    log(`メッセージのパースエラー: ${e.message}`);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                log(`WebSocket接続が閉じられました: ${event.code} - ${event.reason}`);
+                document.getElementById('connectionStatus').textContent = '未接続';
+                document.getElementById('connectionStatus').style.color = 'red';
+            };
+            
+            socket.onerror = function(error) {
+                log(`WebSocketエラー: ${error}`);
+            };
+        }
+        
+        function disconnect() {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        }
+        
+        // アクション送信
+        function sendAction(action) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                log('WebSocketが接続されていません');
+                return;
+            }
+            
+            const message = {
+                action: action
+            };
+            
+            socket.send(JSON.stringify(message));
+            log(`送信: ${JSON.stringify(message)}`);
+        }
+        
+        // ルーム作成
+        function createRoom() {
+            const userId = document.getElementById('userId').value;
+            const authToken = document.getElementById('authToken').value;
+            
+            if (!userId) {
+                alert('ユーザーIDを入力してください');
+                return;
+            }
+            
+            const headers = {
+                'Content-Type': 'application/json',
+            };
+            
+            if (authToken) {
+                headers['Authorization'] = authToken;
+            }
+            
+            fetch('/api/game/room', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    deck_id: 'test-deck-id'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`ルーム作成結果: ${JSON.stringify(data)}`);
+                if (data.room_id) {
+                    document.getElementById('roomId').value = data.room_id;
+                }
+            })
+            .catch(error => {
+                log(`ルーム作成エラー: ${error.message}`);
+            });
+        }
+        
+        // ルーム参加
+        function joinRoom() {
+            const roomId = document.getElementById('roomId').value;
+            const userId = document.getElementById('userId').value;
+            const authToken = document.getElementById('authToken').value;
+            
+            if (!roomId || !userId) {
+                alert('ルームIDとユーザーIDを入力してください');
+                return;
+            }
+            
+            const headers = {
+                'Content-Type': 'application/json',
+            };
+            
+            if (authToken) {
+                headers['Authorization'] = authToken;
+            }
+            
+            fetch(`/api/game/room/${roomId}/join`, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    deck_id: 'test-deck-id'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`ルーム参加結果: ${JSON.stringify(data)}`);
+            })
+            .catch(error => {
+                log(`ルーム参加エラー: ${error.message}`);
+            });
+        }
+        
+        // ゲームメッセージの処理
+        function handleGameMessage(data) {
+            switch(data.type) {
+                case 'game_state':
+                    updateGameState(data);
+                    break;
+                case 'room_status':
+                    updateRoomStatus(data);
+                    break;
+                case 'error':
+                    log(`エラー: ${data.message}`);
+                    break;
+                default:
+                    log(`未対応のメッセージタイプ: ${data.type}`);
+            }
+        }
+        
+        // ゲーム状態の更新
+        function updateGameState(data) {
+            gameState = data;
+            document.getElementById('gameStatus').textContent = data.status || '進行中';
+            
+            if (data.player1) {
+                document.getElementById('player1Status').textContent = `参加済み (スコア: ${data.player1.score || 0})`;
+            }
+            if (data.player2) {
+                document.getElementById('player2Status').textContent = `参加済み (スコア: ${data.player2.score || 0})`;
+            }
+            
+            // ゲームボードの更新（簡易版）
+            const board = document.getElementById('gameBoard');
+            if (data.board) {
+                board.innerHTML = '<pre>' + JSON.stringify(data.board, null, 2) + '</pre>';
+            }
+        }
+        
+        // ルーム状態の更新
+        function updateRoomStatus(data) {
+            if (data.player1) {
+                document.getElementById('player1Status').textContent = '参加済み';
+            }
+            if (data.player2) {
+                document.getElementById('player2Status').textContent = '参加済み';
+            }
+        }
+        
+        // キーボード操作
+        document.addEventListener('keydown', function(event) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            
+            switch(event.key) {
+                case 'ArrowLeft':
+                    event.preventDefault();
+                    sendAction('move_left');
+                    break;
+                case 'ArrowRight':
+                    event.preventDefault();
+                    sendAction('move_right');
+                    break;
+                case 'ArrowDown':
+                    event.preventDefault();
+                    sendAction('soft_drop');
+                    break;
+                case 'ArrowUp':
+                case 'z':
+                case 'Z':
+                    event.preventDefault();
+                    sendAction('rotate');
+                    break;
+                case ' ':
+                    event.preventDefault();
+                    sendAction('hard_drop');
+                    break;
+                case 'c':
+                case 'C':
+                    event.preventDefault();
+                    sendAction('hold');
+                    break;
+            }
+        });
+        
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            log('GITRIS WebSocket Test Client が読み込まれました');
+            updateBoard([]);
+        });
+    </script>
+</body>
+</html> 

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,14 +19,29 @@ func GetUserIDFromContext(ctx context.Context) (string, bool) {
 	return userID, ok
 }
 
+// writeJSONError writes a JSON error response
+func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // AuthMiddleware is a middleware function that checks for a valid JWT token.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// テスト用: 環境変数で認証をバイパス可能にする
+		if os.Getenv("BYPASS_AUTH") == "true" {
+			// テスト用のユーザーIDを設定
+			ctx := context.WithValue(r.Context(), UserIDKey{}, "test-user-123")
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		// 1. authorizationヘッダーからJWTを取得
 		authHeader := r.Header.Get("Authorization")
 		log.Printf("AuthMiddleware Debug: Authorization header: %s", authHeader)
 		if authHeader == "" {
-			http.Error(w, "Authorization header is required", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Authorization header is required")
 			return
 		}
 
@@ -34,8 +50,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			tokenString = authHeader[7:]
 			log.Printf("AuthMiddleware Debug: Extracted token: %s", tokenString)
 		} else {
-			http.Error(w, "Invalid Authorization header format. Must be 'Bearer <token>'",
-				http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Invalid Authorization header format. Must be 'Bearer <token>'")
 			return
 		}
 
@@ -44,7 +59,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		log.Printf("AuthMiddleware Debug: JWT Secret length: %d", len(jwtSecret))
 		if jwtSecret == "" {
 			log.Println("Error: SUPABASE_JWT_SECRET environment variable is not set.")
-			http.Error(w, "Server configuration error: JWT secret missing", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "Server configuration error: JWT secret missing")
 			return
 		}
 
@@ -60,13 +75,13 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		if err != nil {
 			log.Printf("AuthMiddleware Error: JWT parse error: %v", err)
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Invalid token")
 			return
 		}
 
 		if !token.Valid {
 			log.Printf("AuthMiddleware Error: Invalid token")
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Invalid token")
 			return
 		}
 
@@ -74,7 +89,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			log.Printf("AuthMiddleware Error: Invalid token claims")
-			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Invalid token claims")
 			return
 		}
 
@@ -82,7 +97,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		userID, ok := claims["sub"].(string)
 		if !ok {
 			log.Printf("AuthMiddleware Error: JWT claims missing 'sub' (userID) or wrong type: %v", claims["sub"])
-			http.Error(w, "Invalid token: missing user ID", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Invalid token: missing user ID")
 			return
 		}
 
