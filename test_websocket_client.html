@@ -319,6 +319,14 @@
                         <span class="status-label">Player 2:</span>
                         <span class="status-value" id="player2Status">未参加</span>
                     </div>
+                    <div class="status-item">
+                        <span class="status-label">制限時間:</span>
+                        <span class="status-value" id="timeLimit">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">残り時間:</span>
+                        <span class="status-value" id="remainingTime">--</span>
+                    </div>
                 </div>
                 
                 <div class="tetris-board" id="player1Board"></div>
@@ -1016,6 +1024,34 @@
             const gameStatus = data.status || '不明';
             document.getElementById('gameStatus').textContent = gameStatus;
             
+            // 時間制限の表示更新
+            if (data.time_limit) {
+                document.getElementById('timeLimit').textContent = `${data.time_limit}秒`;
+            }
+            
+            // 残り時間の表示更新（ゲーム中のみ）
+            if (data.remaining_time !== undefined && gameStatus === 'playing') {
+                const remainingTime = Math.max(0, data.remaining_time);
+                document.getElementById('remainingTime').textContent = `${remainingTime}秒`;
+                
+                // 残り時間が少ない場合は警告色にする
+                const remainingElement = document.getElementById('remainingTime');
+                if (remainingTime <= 3) {
+                    remainingElement.style.color = '#e74c3c'; // 赤
+                    remainingElement.style.fontWeight = 'bold';
+                } else if (remainingTime <= 5) {
+                    remainingElement.style.color = '#f39c12'; // オレンジ
+                    remainingElement.style.fontWeight = 'bold';
+                } else {
+                    remainingElement.style.color = '#4ecdc4'; // 通常の色
+                    remainingElement.style.fontWeight = 'normal';
+                }
+            } else {
+                document.getElementById('remainingTime').textContent = '--';
+                document.getElementById('remainingTime').style.color = '#4ecdc4';
+                document.getElementById('remainingTime').style.fontWeight = 'normal';
+            }
+            
             // プレイヤー1の状態更新
             if (data.player1) {
                 const player1Status = `参加済み (ID: ${data.player1.user_id || 'N/A'})`;
@@ -1064,6 +1100,40 @@
                 drawMiniBoard('player2Hold', data.player2.held_piece);
             } else {
                 document.getElementById('player2Status').textContent = '未参加';
+            }
+            
+            // ゲーム終了状態の特別な処理
+            if (gameStatus === 'finished') {
+                // ゲーム終了時の勝敗判定
+                let endMessage = '🏁 ゲーム終了！';
+                
+                if (data.player1 && data.player2) {
+                    if (data.player1.is_game_over && !data.player2.is_game_over) {
+                        endMessage = `🏆 Player 2 (${data.player2.user_id}) の勝利！`;
+                    } else if (!data.player1.is_game_over && data.player2.is_game_over) {
+                        endMessage = `🏆 Player 1 (${data.player1.user_id}) の勝利！`;
+                    } else if (data.remaining_time === 0) {
+                        // 時間切れの場合はスコアで判定
+                        const score1 = data.player1.score || 0;
+                        const score2 = data.player2.score || 0;
+                        if (score1 > score2) {
+                            endMessage = `⏰ 時間切れ！ Player 1 (${data.player1.user_id}) の勝利！ (${score1} vs ${score2})`;
+                        } else if (score2 > score1) {
+                            endMessage = `⏰ 時間切れ！ Player 2 (${data.player2.user_id}) の勝利！ (${score2} vs ${score1})`;
+                        } else {
+                            endMessage = `⏰ 時間切れ！ 引き分け！ (${score1} vs ${score2})`;
+                        }
+                    } else {
+                        endMessage = '🏁 ゲーム終了 (引き分け)';
+                    }
+                }
+                
+                log(endMessage);
+                
+                // ゲーム終了時にポップアップ表示（任意）
+                setTimeout(() => {
+                    alert(endMessage);
+                }, 500);
             }
             
             // ゲーム状態変更のみログに記録
