@@ -101,6 +101,7 @@ func main() {
 	// 合言葉ベースのマッチング・状態取得
 	gameRouter.HandleFunc("/room/passcode/{passcode}/join", gameHandler.JoinRoomByPasscode).Methods("POST", "OPTIONS")
 	gameRouter.HandleFunc("/room/passcode/{passcode}/status", gameHandler.GetRoomStatus).Methods("GET", "OPTIONS")
+	gameRouter.HandleFunc("/room/passcode/{passcode}/delete", gameHandler.DeleteSession).Methods("DELETE", "OPTIONS")
 
 	// WebSocket接続（合言葉ベース）
 	r.HandleFunc("/api/game/ws/{passcode}", gameHandler.HandleWebSocketConnection)

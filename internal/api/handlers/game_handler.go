@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -151,8 +153,9 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 		log.Printf("[GameHandler] Received message: %s", string(message))
 		
 		var authMsg struct {
-			Type  string `json:"type"`
-			Token string `json:"token"`
+			Type   string `json:"type"`
+			Token  string `json:"token"`
+			UserID string `json:"user_id"`
 		}
 		
 		if err := json.Unmarshal(message, &authMsg); err != nil {
@@ -164,10 +167,25 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 		log.Printf("[GameHandler] Parsed auth message - Type: %s, Token length: %d", authMsg.Type, len(authMsg.Token))
 		
 		if authMsg.Type == "auth" {
-			// JWTトークンの検証（auth_middleware.goと同じロジック）
-			if authMsg.Token == "BYPASS_AUTH" {
-				userID = "test-user-123"
-				log.Printf("[GameHandler] Using BYPASS_AUTH for user: %s", userID)
+			// 環境変数で認証バイパスが有効な場合
+			if os.Getenv("BYPASS_AUTH") == "true" {
+				// クライアントが指定したUserIDを使用（指定がない場合は生成）
+				if authMsg.UserID != "" {
+					userID = authMsg.UserID
+					log.Printf("[GameHandler] BYPASS_AUTH=true: Using client-specified UserID: %s", userID)
+				} else {
+					// テスト用のユニークなUserIDを生成（タイムスタンプ + ランダム）
+					randBytes := make([]byte, 4)
+					rand.Read(randBytes)
+					userID = fmt.Sprintf("test-user-%d-%s", time.Now().Unix(), hex.EncodeToString(randBytes))
+					log.Printf("[GameHandler] BYPASS_AUTH=true: Generated unique test user: %s", userID)
+				}
+			} else if authMsg.Token == "" || authMsg.Token == "BYPASS_AUTH" {
+				// 認証バイパスが無効で、トークンが空または無効
+				log.Printf("[GameHandler] No valid token provided and BYPASS_AUTH disabled")
+				conn.WriteJSON(map[string]string{"error": "Authentication required"})
+				conn.Close()
+				return
 			} else {
 				// JWT Secretを取得
 				jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
@@ -328,6 +346,41 @@ func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request)
 		"message":        message,
 		"session_id":     sessionID,
 		"is_new_session": isNewSession,
+		"user_id":        userID, // UserIDをレスポンスに含める
+	})
+}
+
+// DeleteSession は指定された合言葉のセッションを削除するハンドラーです。
+func (h *GameHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[GameHandler] DeleteSession called")
+	
+	vars := mux.Vars(r)
+	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
+	if passcode == "" {
+		WriteErrorResponse(w, http.StatusBadRequest, "合言葉が必要です")
+		return
+	}
+	log.Printf("[GameHandler] Deleting session with passcode: %s", passcode)
+
+	// セッションの存在を確認
+	_, exists := h.sessionManager.GetGameSession(passcode)
+	if !exists {
+		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは見つかりませんでした")
+		return
+	}
+
+	// セッションを削除
+	err := h.sessionManager.DeleteSession(passcode)
+	if err != nil {
+		log.Printf("[GameHandler] Failed to delete session %s: %v", passcode, err)
+		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("セッションの削除に失敗しました: %v", err))
+		return
+	}
+
+	log.Printf("[GameHandler] Successfully deleted session: %s", passcode)
+	WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("セッション「%s」を削除しました", passcode),
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -753,6 +754,11 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 	// mutexをアンロックしてからブロードキャスト（デッドロック回避）
 	sm.mu.Unlock()
 	sm.BroadcastGameState(passcode)
+	
+	// ゲーム終了の通知をクライアントが受信する時間を確保（3秒待機）
+	log.Printf("[SessionManager] Waiting 3 seconds for clients to receive final game state...")
+	time.Sleep(3 * time.Second)
+	
 	sm.mu.Lock()
 
 	// セッションに関連するクライアントのクリーンアップ
@@ -778,12 +784,46 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 }
 
 // GetGameSession は指定された合言葉のゲームセッションを取得します。
-// 主にハンドラーからセッション情報を取得するために使用されます。
+// セッションが存在しない場合は nil と false を返します。
 func (sm *SessionManager) GetGameSession(passcode string) (*GameSession, bool) {
 	sm.mu.RLock()
-	defer sm.mu.RUnlock()
 	session, ok := sm.sessions[passcode]
+	sm.mu.RUnlock()
 	return session, ok
+}
+
+// DeleteSession は指定された合言葉のセッションを削除します。
+func (sm *SessionManager) DeleteSession(passcode string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	
+	session, exists := sm.sessions[passcode]
+	if !exists {
+		return fmt.Errorf("passcode %s のセッションは見つかりませんでした", passcode)
+	}
+	
+	// セッションに接続されているクライアントをすべて切断
+	if session.Player1 != nil {
+		if client, ok := sm.clients[session.Player1.UserID]; ok {
+			client.SafeClose()
+			delete(sm.clients, session.Player1.UserID)
+			log.Printf("[SessionManager] Disconnected player1 %s from deleted session %s", session.Player1.UserID, passcode)
+		}
+	}
+	
+	if session.Player2 != nil {
+		if client, ok := sm.clients[session.Player2.UserID]; ok {
+			client.SafeClose()
+			delete(sm.clients, session.Player2.UserID)
+			log.Printf("[SessionManager] Disconnected player2 %s from deleted session %s", session.Player2.UserID, passcode)
+		}
+	}
+	
+	// セッションをマップから削除
+	delete(sm.sessions, passcode)
+	log.Printf("[SessionManager] Deleted session %s", passcode)
+	
+	return nil
 }
 
 // Shutdown はSessionManagerを安全にシャットダウンします
@@ -875,9 +915,14 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 			return "", false, errors.New("このルームは既に満室です")
 		}
 		
-		if session.Player1 != nil && session.Player1.UserID == playerID {
-			log.Printf("[SessionManager] Player %s cannot join their own room %s", playerID, passcode)
-			return "", false, errors.New("自分が作成したルームには参加できません")
+		// 開発・テスト用: 環境変数でこの制限を無効化可能
+		if os.Getenv("ALLOW_SAME_USER_JOIN") != "true" {
+			if session.Player1 != nil && session.Player1.UserID == playerID {
+				log.Printf("[SessionManager] Player %s cannot join their own room %s", playerID, passcode)
+				return "", false, errors.New("自分が作成したルームには参加できません")
+			}
+		} else {
+			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true: Same user join allowed for testing")
 		}
 
 		log.Printf("[SessionManager] Adding player2 to existing session: %s", passcode)
