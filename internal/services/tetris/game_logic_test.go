@@ -385,3 +385,146 @@ func TestApplyPlayerInput_HoldGameOver(t *testing.T) {
 }
 
 // `go test -v ./services/tetris/...` コマンドでテストを実行できます。
+
+// TestUpdateContributionScoresFromPiece はupdateContributionScoresFromPiece関数をテストします。
+func TestUpdateContributionScoresFromPiece(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// テスト用のピースを作成（ScoreDataを含む）
+	// T-ピースの0度回転時の配置: {{1, 0}, {0, 1}, {1, 1}, {2, 1}}
+	// X=5, Y=10に配置した場合の実際のボード座標:
+	// (5+1, 10+0) = (6, 10)
+	// (5+0, 10+1) = (5, 11)  
+	// (5+1, 10+1) = (6, 11)
+	// (5+2, 10+1) = (7, 11)
+	testPiece := &tetris.Piece{
+		Type:     tetris.TypeT,
+		X:        5,
+		Y:        10,
+		Rotation: 0,
+		ScoreData: map[string]int{
+			"rot_0_1_0": 100, // ブロック座標 (6, 10)
+			"rot_0_0_1": 200, // ブロック座標 (5, 11)
+			"rot_0_1_1": 300, // ブロック座標 (6, 11)
+			"rot_0_2_1": 400, // ブロック座標 (7, 11)
+		},
+	}
+
+	// 初期状態では該当位置にスコアがないことを確認
+	scoreKey1 := "10_6" // Y=10, X=6
+	scoreKey2 := "11_5" // Y=11, X=5
+	scoreKey3 := "11_6" // Y=11, X=6
+	scoreKey4 := "11_7" // Y=11, X=7
+
+	// スコア更新前の値を記録
+	initialScore1 := state.ContributionScores[scoreKey1]
+	initialScore2 := state.ContributionScores[scoreKey2]
+	initialScore3 := state.ContributionScores[scoreKey3]
+	initialScore4 := state.ContributionScores[scoreKey4]
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが正しく更新されたことを確認
+	if state.ContributionScores[scoreKey1] != 100 {
+		t.Errorf("Expected score at %s to be 100, but got %d", scoreKey1, state.ContributionScores[scoreKey1])
+	}
+	if state.ContributionScores[scoreKey2] != 200 {
+		t.Errorf("Expected score at %s to be 200, but got %d", scoreKey2, state.ContributionScores[scoreKey2])
+	}
+	if state.ContributionScores[scoreKey3] != 300 {
+		t.Errorf("Expected score at %s to be 300, but got %d", scoreKey3, state.ContributionScores[scoreKey3])
+	}
+	if state.ContributionScores[scoreKey4] != 400 {
+		t.Errorf("Expected score at %s to be 400, but got %d", scoreKey4, state.ContributionScores[scoreKey4])
+	}
+
+	t.Logf("Score update test passed. Initial scores: [%d, %d, %d, %d] -> Final scores: [%d, %d, %d, %d]",
+		initialScore1, initialScore2, initialScore3, initialScore4,
+		state.ContributionScores[scoreKey1], state.ContributionScores[scoreKey2],
+		state.ContributionScores[scoreKey3], state.ContributionScores[scoreKey4])
+}
+
+// TestUpdateContributionScoresFromPiece_NilPiece はnil参照のケースをテストします。
+func TestUpdateContributionScoresFromPiece_NilPiece(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// nilピースでの呼び出し（パニックが発生しないことを確認）
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("updateContributionScoresFromPiece panicked with nil piece: %v", r)
+		}
+	}()
+
+	updateContributionScoresFromPiece(state, nil)
+	// パニックが発生しなければテスト成功
+}
+
+// TestUpdateContributionScoresFromPiece_EmptyScoreData は空のScoreDataのケースをテストします。
+func TestUpdateContributionScoresFromPiece_EmptyScoreData(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// 空のScoreDataを持つピース
+	testPiece := &tetris.Piece{
+		Type:      tetris.TypeI,
+		X:         3,
+		Y:         5,
+		Rotation:  0,
+		ScoreData: map[string]int{},
+	}
+
+	// 初期状態のスコアを記録
+	initialScores := make(map[string]int)
+	for key, value := range state.ContributionScores {
+		initialScores[key] = value
+	}
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが変更されていないことを確認
+	for key, initialValue := range initialScores {
+		if state.ContributionScores[key] != initialValue {
+			t.Errorf("Expected score at %s to remain %d, but got %d", key, initialValue, state.ContributionScores[key])
+		}
+	}
+}
+
+// TestUpdateContributionScoresFromPiece_OutOfBounds は範囲外座標のケースをテストします。
+func TestUpdateContributionScoresFromPiece_OutOfBounds(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// ボード範囲外に配置されたピース
+	testPiece := &tetris.Piece{
+		Type:     tetris.TypeT,
+		X:        -5, // 範囲外のX座標
+		Y:        -5, // 範囲外のY座標
+		Rotation: 0,
+		ScoreData: map[string]int{
+			"rot_0_0_0": 500,
+			"rot_0_1_0": 600,
+			"rot_0_0_1": 700,
+			"rot_0_1_1": 800,
+		},
+	}
+
+	// 初期状態のスコアを記録
+	initialScores := make(map[string]int)
+	for key, value := range state.ContributionScores {
+		initialScores[key] = value
+	}
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが変更されていないことを確認（範囲外なので影響なし）
+	for key, initialValue := range initialScores {
+		if state.ContributionScores[key] != initialValue {
+			t.Errorf("Expected score at %s to remain %d with out-of-bounds piece, but got %d", key, initialValue, state.ContributionScores[key])
+		}
+	}
+}

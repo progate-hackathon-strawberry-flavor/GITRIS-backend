@@ -1,8 +1,8 @@
 package tetris
 
 import (
-	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models/tetris"
@@ -28,6 +28,20 @@ func GetFallInterval(level int) time.Duration {
 	return interval
 }
 
+// spawnPieceAtCenter は指定されたテトリミノタイプの適切な初期位置を返します
+func spawnPieceAtCenter(pieceType tetris.PieceType) (int, int) {
+	y := 1 // 全てのテトリミノの初期Y位置は1
+	
+	switch pieceType {
+	case tetris.TypeI:
+		return tetris.BoardWidth/2 - 2, y // I-ミノは幅4なので中心から-2
+	case tetris.TypeO:
+		return tetris.BoardWidth/2 - 1, y // O-ミノは幅2なので中心から-1
+	default:
+		return tetris.BoardWidth/2 - 1, y // その他のミノは幅3なので中心から-1
+	}
+}
+
 // ApplyPlayerInput はプレイヤーの入力をゲーム状態に適用します。
 //
 // Parameters:
@@ -36,8 +50,13 @@ func GetFallInterval(level int) time.Duration {
 // Returns:
 //   bool: ピースが移動・回転・固定されたかどうか（描画更新の判定に使用）
 func ApplyPlayerInput(state *PlayerGameState, action string) bool {
-	if state.CurrentPiece == nil || state.IsGameOver {
-		return false // ゲームオーバーまたは現在のピースがない場合は何もしない
+	if state.IsGameOver {
+		return false
+	}
+
+	if state.CurrentPiece == nil {
+		log.Printf("[ERROR] CurrentPiece is nil for user %s during action %s", state.UserID, action)
+		return false
 	}
 
 	moved := false
@@ -53,129 +72,67 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			state.CurrentPiece.X++
 			moved = true
 		}
-	case "rotate", "rotate_right":
-		// 時計回り（右回転）
-		originalRotation := state.CurrentPiece.Rotation
-		state.CurrentPiece.Rotate() // Pieceのメソッドを使用してO-ミノの回転制御を適用
+	case "down", "soft_drop":
+		// ソフトドロップ（手動でピースを下に落とす）
+		if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
+			state.CurrentPiece.Y++
+			moved = true
+		}
+	case "hard_drop":
+		// ハードドロップ（ピースを一番下まで瞬時に落とす）
+		dropDistance := 0
+		for !state.Board.HasCollision(state.CurrentPiece, 0, dropDistance+1) {
+			dropDistance++
+		}
+		if dropDistance > 0 {
+			state.CurrentPiece.Y += dropDistance
+			moved = true
+		}
+		// ハードドロップ後はピースを即座に固定
+		state.Board.MergePiece(state.CurrentPiece)
+		handlePieceLock(state)
+	case "rotate_right", "rotate":
+		// 右回転
+		oldRotation := state.CurrentPiece.Rotation
+		state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 1) % 4
 		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-			// 回転に失敗した場合は元に戻す
-			state.CurrentPiece.Rotation = originalRotation
+			// 衝突する場合は回転を元に戻す
+			state.CurrentPiece.Rotation = oldRotation
 		} else {
 			moved = true
 		}
 	case "rotate_left":
-		// 反時計回り（左回転）
-		originalRotation := state.CurrentPiece.Rotation
-		state.CurrentPiece.RotateCounterClockwise() // Pieceのメソッドを使用してO-ミノの回転制御を適用
+		// 左回転
+		oldRotation := state.CurrentPiece.Rotation
+		state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 3) % 4 // +3 is equivalent to -1 in mod 4
 		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-			// 回転に失敗した場合は元に戻す
-			state.CurrentPiece.Rotation = originalRotation
+			// 衝突する場合は回転を元に戻す
+			state.CurrentPiece.Rotation = oldRotation
 		} else {
 			moved = true
 		}
-	case "soft_drop": // 通常落下を加速
-		if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
-			state.CurrentPiece.Y++
-			state.Score += 1 // ソフトドロップのボーナス (仮)
-			moved = true
-		} else {
-			// 着地した場合はピースを固定
-			state.Board.MergePiece(state.CurrentPiece) // ← この行が欠落していた！
-			handlePieceLock(state)
-		}
-		state.lastFallTime = time.Now() // ソフトドロップしたら落下タイマーをリセット
-	case "hard_drop":
-		if state.CurrentPiece == nil { return false } // 念のため
-
-		// ハードドロップ距離を最適化された方法で計算
-		dropDistance := 0
-		maxDropDistance := tetris.BoardHeight - state.CurrentPiece.Y // 最大落下可能距離
-		for dropDistance < maxDropDistance && !state.Board.HasCollision(state.CurrentPiece, 0, dropDistance+1) {
-			dropDistance++
-		}
-		
-		// 一度にY座標を更新（ループなし）
-		state.CurrentPiece.Y += dropDistance
-		state.Score += dropDistance * 2 // ハードドロップのボーナス（一度に計算）
-		
-		// ピースをボードに固定
-		state.Board.MergePiece(state.CurrentPiece)
-		handlePieceLock(state) // 固定後の処理
-		state.lastFallTime = time.Now() // ハードドロップしたら落下タイマーをリセット
-		
-		// ハードドロップ後はスコア更新を強制スキップ（高速化）
-		// 新しいピースが生成されてからクライアント側で更新される
-		moved = true
 	case "hold":
-		// ホールド機能の安全性チェック
-		if state.CurrentPiece == nil {
-			log.Printf("[WARN] Hold action attempted with nil CurrentPiece for user %s", state.UserID)
-			break // 現在のピースがない場合は何もしない
-		}
-		
-		if state.HeldPiece == nil {
-			// 初回ホールド: 現在のピースをホールドし、次のピースを現在のピースにする
-			state.HeldPiece = &tetris.Piece{
-				Type:     state.CurrentPiece.Type,
-				X:        0,
-				Y:        0,
-				Rotation: 0,
-				ScoreData: make(map[string]int), // ScoreDataマップを初期化
-			}
-			
-			// ScoreDataを深いコピー
-			if state.CurrentPiece.ScoreData != nil {
-				for key, value := range state.CurrentPiece.ScoreData {
-					state.HeldPiece.ScoreData[key] = value
-				}
-			}
-			
-			state.CurrentPiece = state.NextPiece
-			if state.CurrentPiece == nil {
-				log.Printf("[ERROR] NextPiece is nil during hold for user %s", state.UserID)
-				state.CurrentPiece = state.GetNextPieceFromQueue()
-			}
-			
-			state.NextPiece = state.GetNextPieceFromQueue()
-			
-			// テトリミノの種類に応じた適切な初期位置を設定
-			if state.CurrentPiece != nil {
-				switch state.CurrentPiece.Type {
-				case tetris.TypeI:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-					state.CurrentPiece.Y = 1
-				case tetris.TypeO:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				case tetris.TypeL:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				default:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				}
-				state.CurrentPiece.Rotation = 0
-			}
-			moved = true
-		} else {
-			// 2回目以降のホールド: 現在のピースとホールドピースを交換
+		// ホールド機能（今回が既に使用済みでなければ実行）
+		if !state.hasUsedHold {
+			state.hasUsedHold = true
+
+			// 現在のピースを一時保存
 			currentPieceCopy := &tetris.Piece{
-				Type:     state.CurrentPiece.Type,
-				X:        state.CurrentPiece.X,
-				Y:        state.CurrentPiece.Y,
-				Rotation: state.CurrentPiece.Rotation,
-				ScoreData: make(map[string]int), // ScoreDataマップを初期化
+				Type:      state.CurrentPiece.Type,
+				X:         state.CurrentPiece.X,
+				Y:         state.CurrentPiece.Y,
+				Rotation:  state.CurrentPiece.Rotation,
+				ScoreData: state.CurrentPiece.ScoreData,
 			}
 			
-			// ScoreDataを深いコピー
-			if state.CurrentPiece.ScoreData != nil {
-				for key, value := range state.CurrentPiece.ScoreData {
-					currentPieceCopy.ScoreData[key] = value
-				}
+			if state.HeldPiece == nil {
+				// 初回ホールド：次のピースを現在のピースに設定
+				state.CurrentPiece = state.NextPiece
+				state.NextPiece = state.GetNextPieceFromQueue()
+			} else {
+				// 2回目以降のホールド：ホールドピースと交換
+				state.CurrentPiece = state.HeldPiece
 			}
-			
-			// ホールドピースを現在のピースとして設定
-			state.CurrentPiece = state.HeldPiece
 			
 			// 安全性チェック
 			if state.CurrentPiece == nil {
@@ -184,20 +141,9 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 				state.NextPiece = state.GetNextPieceFromQueue()
 			} else {
 				// テトリミノの種類に応じた適切な初期位置を設定
-				switch state.CurrentPiece.Type {
-				case tetris.TypeI:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-					state.CurrentPiece.Y = 1
-				case tetris.TypeO:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				case tetris.TypeL:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				default:
-					state.CurrentPiece.X = tetris.BoardWidth/2 - 1
-					state.CurrentPiece.Y = 1
-				}
+				x, y := spawnPieceAtCenter(state.CurrentPiece.Type)
+				state.CurrentPiece.X = x
+				state.CurrentPiece.Y = y
 				state.CurrentPiece.Rotation = 0
 			}
 			
@@ -322,9 +268,9 @@ func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Pie
 
 		// ボードの有効な範囲内のみ処理
 		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
-			// 文字列作成の最適化
-			scoreKey := fmt.Sprintf("%d_%d", boardY, boardX)
-			rotationKey := fmt.Sprintf("rot_%d_%d_%d", piece.Rotation, block[0], block[1])
+			// 文字列作成の最適化: strconv使用でfmt.Sprintfより高速
+			scoreKey := strconv.Itoa(boardY) + "_" + strconv.Itoa(boardX)
+			rotationKey := "rot_" + strconv.Itoa(piece.Rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
 			// スコア存在チェックを効率化
 			if score, exists := piece.ScoreData[rotationKey]; exists && score > 0 {

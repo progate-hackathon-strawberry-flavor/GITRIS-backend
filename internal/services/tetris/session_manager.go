@@ -154,10 +154,15 @@ func (sm *SessionManager) Run() {
 			// クライアントの登録解除処理
 			sm.mu.Lock()
 			if registeredClient, ok := sm.clients[client.UserID]; ok {
-				// Sendチャネルを安全に閉じる
-				registeredClient.SafeClose()
-				delete(sm.clients, client.UserID)
-				log.Printf("[SessionManager] Client unregistered: %s (Passcode: %s)", client.UserID, client.RoomID)
+				// 同じクライアントインスタンスの場合のみ登録解除（重複解除防止）
+				if registeredClient == client {
+					// Sendチャネルを安全に閉じる
+					registeredClient.SafeClose()
+					delete(sm.clients, client.UserID)
+					log.Printf("[SessionManager] Client unregistered: %s (Passcode: %s)", client.UserID, client.RoomID)
+				} else {
+					log.Printf("[SessionManager] Skipped unregister for user %s (different client instance)", client.UserID)
+				}
 			} else {
 				log.Printf("[SessionManager] Attempted to unregister non-existent client: %s", client.UserID)
 			}
@@ -223,8 +228,10 @@ func (sm *SessionManager) Run() {
 					// ゲームオーバーは重要なので即座にブロードキャスト
 					go func(passcode string) {
 						sm.BroadcastGameState(passcode)
+						// ゲーム結果をクライアントが受信する時間を確保するため、少し遅延してからセッション終了
+						time.Sleep(2 * time.Second)
+						sm.EndGameSession(passcode)
 					}(session.ID)
-					sm.EndGameSession(session.ID)
 				}
 			}
 
@@ -264,7 +271,11 @@ func (sm *SessionManager) Run() {
 
 				// ゲームオーバー判定 (自動落下でゲームオーバーになることもありえる)
 				if (session.Player1 != nil && session.Player1.IsGameOver) || (session.Player2 != nil && session.Player2.IsGameOver) {
-					sm.EndGameSession(session.ID)
+					// 自動落下でのゲームオーバーも遅延してセッション終了
+					go func(sessionID string) {
+						time.Sleep(2 * time.Second)
+						sm.EndGameSession(sessionID)
+					}(session.ID)
 				}
 			}
 
@@ -449,29 +460,32 @@ func (sm *SessionManager) readPump(client *Client) {
 			log.Printf("[SessionManager] Panic in readPump for user %s: %v", client.UserID, r)
 		}
 		
-		// クライアントの切断処理
-		log.Printf("[SessionManager] Client %s disconnecting from room %s", client.UserID, client.RoomID)
-		sm.unregister <- client // クライアントが切断されたら登録解除を通知
+		// クライアントの切断処理（unregisterのみ実行、コネクション切断はwritePumpで処理）
+		log.Printf("[SessionManager] ReadPump ending for user %s from room %s", client.UserID, client.RoomID)
 		
-		// WebSocket接続を安全に閉じる
-		if client.Conn != nil {
-			if err := client.Conn.Close(); err != nil {
-				log.Printf("[SessionManager] Error closing WebSocket connection for user %s: %v", client.UserID, err)
-			}
+		// unregister チャネルが閉じられていない場合のみ送信
+		select {
+		case sm.unregister <- client:
+			// 正常に登録解除リクエストを送信
+		default:
+			// unregisterチャネルがフルまたは閉じられている場合
+			log.Printf("[SessionManager] Could not send unregister for user %s (channel full or closed)", client.UserID)
 		}
 	}()
 
 	// WebSocket接続のタイムアウト設定を緩和
-	client.Conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // 5分に延長
+	if client.Conn != nil {
+		client.Conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // 5分に延長
 
-	// Pongハンドラーを設定（ピングに対する応答でタイムアウトをリセット）
-	client.Conn.SetPongHandler(func(string) error {
-		client.Conn.SetReadDeadline(time.Now().Add(300 * time.Second))
-		return nil
-	})
+		// Pongハンドラーを設定（ピングに対する応答でタイムアウトをリセット）
+		client.Conn.SetPongHandler(func(string) error {
+			client.Conn.SetReadDeadline(time.Now().Add(300 * time.Second))
+			return nil
+		})
 
-	// メッセージサイズ制限を設定
-	client.Conn.SetReadLimit(1024) // 1KBに増加（パフォーマンス改善）
+		// メッセージサイズ制限を設定
+		client.Conn.SetReadLimit(1024) // 1KBに増加（パフォーマンス改善）
+	}
 
 	for {
 		// 接続状態チェック
@@ -491,7 +505,7 @@ func (sm *SessionManager) readPump(client *Client) {
 			} else {
 				log.Printf("[SessionManager] WebSocket read error for user %s: %v", client.UserID, err)
 			}
-			// 安全に終了
+			// 安全に終了（コネクション切断はwritePumpに任せる）
 			return
 		}
 		
@@ -533,17 +547,24 @@ func (c *Client) writePump() {
 			log.Printf("[Client] Panic in writePump for user %s: %v", c.UserID, r)
 		}
 		
-		// WebSocket接続を安全に閉じる
+		// WebSocket接続を安全に閉じる（一度だけ実行されるように）
 		if c.Conn != nil {
+			log.Printf("[Client] Closing WebSocket connection for user %s", c.UserID)
 			if err := c.Conn.Close(); err != nil {
-				log.Printf("[Client] Error closing WebSocket connection for user %s: %v", c.UserID, err)
+				// 既に閉じられている場合のエラーは無視
+				if err.Error() != "use of closed network connection" {
+					log.Printf("[Client] Error closing WebSocket connection for user %s: %v", c.UserID, err)
+				}
 			}
+			c.Conn = nil // 重複切断を防ぐ
 		}
 		log.Printf("[Client] WritePump ended for user %s", c.UserID)
 	}()
 
 	// WebSocket接続のタイムアウト設定を緩和
-	c.Conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
+	if c.Conn != nil {
+		c.Conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
+	}
 
 	// ピング送信のタイマー設定（頻度をさらに下げる）
 	ticker := time.NewTicker(60 * time.Second) // 1分間隔に変更
@@ -556,6 +577,12 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
+			// 接続状態チェック
+			if c.Conn == nil {
+				log.Printf("[Client] Connection is nil, terminating writePump for user %s", c.UserID)
+				return
+			}
+
 			// WebSocket書き込みタイムアウトを設定
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) // 短縮してレスポンシブに
 			
@@ -583,6 +610,12 @@ func (c *Client) writePump() {
 			consecutiveErrors = 0
 			
 		case <-ticker.C:
+			// 接続状態チェック
+			if c.Conn == nil {
+				log.Printf("[Client] Connection is nil during ping, terminating writePump for user %s", c.UserID)
+				return
+			}
+
 			// ピングメッセージを定期的に送信してコネクションの生存確認
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,6 +44,7 @@ type PlayerGameState struct {
 	DeckPlacements []DeckPlacementPiece `json:"-"` // デッキから読み込んだテトリミノ配置情報 - JSONシリアライズから除外
 	ConsecutiveClears int            `json:"consecutive_clears"` // 連続ラインクリア数 (コンボボーナス用)
 	BackToBack        bool           `json:"back_to_back"`       // T-Spin, Perfect Clear 後のラインクリアでボーナス
+	hasUsedHold       bool           `json:"-"`                  // 現在のピースでホールドが使用済みかどうか - JSONシリアライズから除外
 	mu                sync.RWMutex   `json:"-"`                  // CurrentPieceScoresの並行アクセス保護用
 }
 
@@ -77,7 +79,7 @@ func NewPlayerGameState(userID string, deck *models.Deck) *PlayerGameState {
 	// 仮でボード全体にランダムなスコアを設定
 	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
-			state.ContributionScores[fmt.Sprintf("%d_%d", y, x)] = r.Intn(400) + 100 // 100-499のスコア
+			state.ContributionScores[strconv.Itoa(y) + "_" + strconv.Itoa(x)] = r.Intn(400) + 100 // 100-499のスコア
 		}
 	}
 
@@ -153,7 +155,7 @@ func NewPlayerGameStateWithDeckPlacements(userID string, deck *models.Deck, deck
 	if len(state.ContributionScores) == 0 {
 		for y := 0; y < tetris.BoardHeight; y++ {
 			for x := 0; x < tetris.BoardWidth; x++ {
-				state.ContributionScores[fmt.Sprintf("%d_%d", y, x)] = r.Intn(400) + 100 // 100-499のスコア
+				state.ContributionScores[strconv.Itoa(y) + "_" + strconv.Itoa(x)] = r.Intn(400) + 100 // 100-499のスコア
 			}
 		}
 	}
@@ -169,7 +171,7 @@ func (s *PlayerGameState) buildContributionScoresFromDeck() {
 	// すべての位置を初期化（デフォルトスコア100）
 	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
-			s.ContributionScores[fmt.Sprintf("%d_%d", y, x)] = 100 // デフォルトスコア
+			s.ContributionScores[strconv.Itoa(y) + "_" + strconv.Itoa(x)] = 100 // デフォルトスコア
 		}
 	}
 
@@ -181,7 +183,7 @@ func (s *PlayerGameState) buildContributionScoresFromDeck() {
 			// 現在は単純にx,yをそのまま使用（後で調整が必要）
 			if block.X >= 0 && block.X < tetris.BoardWidth && 
 			   block.Y >= 0 && block.Y < tetris.BoardHeight {
-				scoreKey := fmt.Sprintf("%d_%d", block.Y, block.X)
+				scoreKey := strconv.Itoa(block.Y) + "_" + strconv.Itoa(block.X)
 				s.ContributionScores[scoreKey] = block.Score
 			}
 		}
@@ -287,12 +289,12 @@ func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tet
 	}
 
 	// すべての回転状態（0, 90, 180, 270度）に対してスコアマッピングを作成
-	for rotation := 0; rotation <= 270; rotation += 90 {
+	for rotation := 0; rotation < 4; rotation++ {
 		blocks := piece.GetBlocksAtRotation(rotation)
 		
 		for i, block := range blocks {
 			// 回転状態別のキーを作成 "rot_rotation_x_y"
-			key := fmt.Sprintf("rot_%d_%d_%d", rotation, block[0], block[1])
+			key := "rot_" + strconv.Itoa(rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
 			// デッキデータの対応するブロックからスコアを取得
 			var score int
@@ -331,12 +333,12 @@ func (s *PlayerGameState) getNextPieceFromDeck() *tetris.Piece {
 	}
 
 	// すべての回転状態（0, 90, 180, 270度）に対してスコアマッピングを作成
-	for rotation := 0; rotation <= 270; rotation += 90 {
+	for rotation := 0; rotation < 4; rotation++ {
 		blocks := piece.GetBlocksAtRotation(rotation)
 		
 		for i, block := range blocks {
 			// 回転状態別のキーを作成 "rot_rotation_x_y"
-			key := fmt.Sprintf("rot_%d_%d_%d", rotation, block[0], block[1])
+			key := "rot_" + strconv.Itoa(rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
 			// デッキデータの対応するブロックからスコアを取得
 			var score int
@@ -382,7 +384,7 @@ func (s *PlayerGameState) GetPieceScoreAtPosition(piece *tetris.Piece, boardX, b
 
 	// フォールバック: ContributionScoresから取得（読み取り専用ロック）
 	s.mu.RLock()
-	scoreKey := fmt.Sprintf("%d_%d", boardY, boardX)
+	scoreKey := strconv.Itoa(boardY) + "_" + strconv.Itoa(boardX)
 	score, exists := s.ContributionScores[scoreKey]
 	s.mu.RUnlock()
 
@@ -409,21 +411,13 @@ func (s *PlayerGameState) SpawnNewPiece() {
 
 	// 初期位置設定（ボードの中央上部、すべてのブロックが表示範囲内）
 	// テトリミノの種類に応じた適切な初期位置を設定
-	switch s.CurrentPiece.Type {
-	case tetris.TypeI:
-		s.CurrentPiece.X = tetris.BoardWidth/2 - 2 // I-ミノは幅4なので中心から-2
-		s.CurrentPiece.Y = 1 // すべてのブロックがボード内に表示される位置
-	case tetris.TypeO:
-		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // O-ミノは幅2なので中心から-1
-		s.CurrentPiece.Y = 1 // すべてのブロックがボード内に表示される位置
-	case tetris.TypeL:
-		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // L-ミノは幅3なので中心から-1
-		s.CurrentPiece.Y = 1 // すべてのブロックがボード内に表示される位置
-	default:
-		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // その他のミノは幅3なので中心から-1
-		s.CurrentPiece.Y = 1 // すべてのブロックがボード内に表示される位置
-	}
+	x, y := spawnPieceAtCenter(s.CurrentPiece.Type)
+	s.CurrentPiece.X = x
+	s.CurrentPiece.Y = y
 	s.CurrentPiece.Rotation = 0 // 必ず回転をリセット
+
+	// ホールドフラグをリセット（新しいピースなのでホールド可能）
+	s.hasUsedHold = false
 
 	// 現在のピースのスコア情報を更新
 	s.updateCurrentPieceScores()
@@ -601,7 +595,7 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 
 		// ボードの有効な範囲内のみ処理
 		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
-			scoreKey := fmt.Sprintf("%d_%d", boardY, boardX)
+			scoreKey := strconv.Itoa(boardY) + "_" + strconv.Itoa(boardX)
 			
 			// スコア取得ロジック（効率化）
 			score := 100 // デフォルトスコア
@@ -612,7 +606,7 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 				relativeY := block[1]
 				
 				// 現在の回転状態での位置キーを作成
-				rotationKey := fmt.Sprintf("rot_%d_%d_%d", s.CurrentPiece.Rotation, relativeX, relativeY)
+				rotationKey := "rot_" + strconv.Itoa(s.CurrentPiece.Rotation) + "_" + strconv.Itoa(relativeX) + "_" + strconv.Itoa(relativeY)
 				
 				// ピースのスコアデータから取得を試みる
 				if pieceScore, exists := s.CurrentPiece.ScoreData[rotationKey]; exists && pieceScore > 0 {
