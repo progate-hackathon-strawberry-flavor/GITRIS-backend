@@ -73,115 +73,20 @@ func WriteJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) 
 	json.NewEncoder(w).Encode(data)
 }
 
-// CreateRoom は新しいゲームセッション（部屋）を作成するためのHTTPハンドラーです。
-// リクエストボディからデッキIDを取得し、セッションマネージャーに部屋の作成を依頼します。
-func (h *GameHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[GameHandler] CreateRoom called")
-	
-	// ユーザー認証情報をコンテキストから取得する
-	userID, err := ExtractUserIDFromContext(r) // api/handlers/auth_utils.go の関数を使用
-	if err != nil {
-		log.Printf("[GameHandler] Failed to extract user ID: %v", err)
-		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
-		return
-	}
-	log.Printf("[GameHandler] User ID extracted: %s", userID)
 
-	// リクエストボディからプレイヤーのデッキIDを取得
-	var req struct {
-		DeckID string `json:"deck_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[GameHandler] Failed to parse request body: %v", err)
-		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディのパースに失敗しました")
-		return
-	}
-	log.Printf("[GameHandler] Request parsed, deck_id: %s", req.DeckID)
-	
-	if req.DeckID == "" {
-		log.Printf("[GameHandler] Deck ID is empty")
-		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
-		return
-	}
 
-	log.Printf("[GameHandler] Calling sessionManager.CreateSession for user %s with deck %s", userID, req.DeckID)
-	// セッションマネージャーに新しいルームの作成を依頼
-	roomID, err := h.sessionManager.CreateSession(userID, req.DeckID)
-	if err != nil {
-		log.Printf("[GameHandler] Failed to create room for user %s: %v", userID, err)
-		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("ルームの作成に失敗しました: %v", err))
-		return
-	}
-
-	log.Printf("[GameHandler] Room created successfully: %s", roomID)
-	WriteJSONResponse(w, http.StatusCreated, map[string]string{"room_id": roomID, "message": "ルームを作成しました"})
-}
-
-// JoinRoom は既存のゲームセッション（部屋）に参加するためのHTTPハンドラーです。
-// URLパラメータからroomIDを、リクエストボディからデッキIDを取得します。
-func (h *GameHandler) JoinRoom(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[GameHandler] JoinRoom called")
-	
-	// ユーザー認証情報をコンテキストから取得する
-	userID, err := ExtractUserIDFromContext(r) // api/handlers/auth_utils.go の関数を使用
-	if err != nil {
-		log.Printf("[GameHandler] Failed to extract user ID for join room: %v", err)
-		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
-		return
-	}
-	log.Printf("[GameHandler] User ID extracted for join room: %s", userID)
-
-	vars := mux.Vars(r)
-	roomID := vars["roomID"] // gorilla/muxのVarsを使用
-	if roomID == "" {
-		log.Printf("[GameHandler] Missing roomID in join room request")
-		WriteErrorResponse(w, http.StatusBadRequest, "ルームIDが必要です")
-		return
-	}
-	log.Printf("[GameHandler] Room ID for join: %s", roomID)
-
-	// リクエストボディからプレイヤーのデッキIDを取得
-	var req struct {
-		DeckID string `json:"deck_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[GameHandler] Failed to parse join room request body: %v", err)
-		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディの解析に失敗しました")
-		return
-	}
-	if req.DeckID == "" {
-		log.Printf("[GameHandler] Missing deck_id in join room request")
-		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
-		return
-	}
-	log.Printf("[GameHandler] Request parsed for join room, deck_id: %s", req.DeckID)
-
-	log.Printf("[GameHandler] Calling sessionManager.JoinSession for user %s, room %s, deck %s", userID, roomID, req.DeckID)
-	
-	// セッションマネージャーに既存のルームへの参加を依頼
-	err = h.sessionManager.JoinSession(roomID, userID, req.DeckID)
-	if err != nil {
-		log.Printf("[GameHandler] User %s failed to join room %s: %v", userID, roomID, err)
-		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("ルームへの参加に失敗しました: %v", err))
-		return
-	}
-
-	log.Printf("[GameHandler] User %s successfully joined room %s", userID, roomID)
-	WriteJSONResponse(w, http.StatusOK, map[string]string{"message": "ルームに参加しました", "room_id": roomID})
-}
-
-// GetRoomStatus は特定のルームの現在の状態を返すハンドラーです。（デバッグやルーム一覧表示用）
+// GetRoomStatus は特定の合言葉のセッションの現在の状態を返すハンドラーです。（デバッグやセッション一覧表示用）
 func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	roomID := vars["roomID"] // gorilla/muxのVarsを使用
-	if roomID == "" {
-		WriteErrorResponse(w, http.StatusBadRequest, "ルームIDが必要です")
+	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
+	if passcode == "" {
+		WriteErrorResponse(w, http.StatusBadRequest, "合言葉が必要です")
 		return
 	}
 
-	session, ok := h.sessionManager.GetGameSession(roomID)
+	session, ok := h.sessionManager.GetGameSession(passcode)
 	if !ok {
-		WriteErrorResponse(w, http.StatusNotFound, "指定されたルームは見つかりませんでした")
+		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは見つかりませんでした")
 		return
 	}
 
@@ -191,41 +96,41 @@ func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 
 // HandleWebSocketConnection はHTTP接続をWebSocketプロトコルにアップグレードし、
 // その後、WebSocketメッセージの送受信をセッションマネージャーに引き渡します。
-// このエンドポイントにはルームIDが含まれます。
+// このエンドポイントには合言葉が含まれます。
 func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[GameHandler] WebSocket connection attempt for room: %s", r.URL.Path)
+	log.Printf("[GameHandler] WebSocket connection attempt for path: %s", r.URL.Path)
 	
 	vars := mux.Vars(r)
 	log.Printf("[GameHandler] mux.Vars result: %+v", vars)
-	roomID := vars["roomID"] // gorilla/muxのVarsを使用
-	log.Printf("[GameHandler] Extracted roomID: '%s'", roomID)
+	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
+	log.Printf("[GameHandler] Extracted passcode: '%s'", passcode)
 	
-	if roomID == "" {
-		log.Printf("[GameHandler] Missing roomID in WebSocket connection")
-		WriteErrorResponse(w, http.StatusBadRequest, "WebSocket接続にはルームIDが必要です")
+	if passcode == "" {
+		log.Printf("[GameHandler] Missing passcode in WebSocket connection")
+		WriteErrorResponse(w, http.StatusBadRequest, "WebSocket接続には合言葉が必要です")
 		return
 	}
 
-	// ルームが存在するかどうかを確認
-	session, exists := h.sessionManager.GetGameSession(roomID)
+	// 合言葉のセッションが存在するかどうかを確認
+	session, exists := h.sessionManager.GetGameSession(passcode)
 	if !exists {
-		log.Printf("[GameHandler] Room %s does not exist", roomID)
-		WriteErrorResponse(w, http.StatusNotFound, "指定されたルームは存在しません")
+		log.Printf("[GameHandler] Passcode %s does not exist", passcode)
+		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは存在しません")
 		return
 	}
-	log.Printf("[GameHandler] Room %s exists, status: %s", roomID, session.Status)
+	log.Printf("[GameHandler] Passcode %s exists, status: %s", passcode, session.Status)
 
-	log.Printf("[GameHandler] Attempting to upgrade connection for room: %s", roomID)
+	log.Printf("[GameHandler] Attempting to upgrade connection for passcode: %s", passcode)
 
 	// HTTP接続をWebSocket接続にアップグレード
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[GameHandler] Failed to upgrade to websocket for room %s: %v", roomID, err)
+		log.Printf("[GameHandler] Failed to upgrade to websocket for passcode %s: %v", passcode, err)
 		return // アップグレード失敗時はエラーログのみ
 	}
 	// defer conn.Close() // ここでは閉じない。SessionManagerが管理するため。
 
-	log.Printf("[GameHandler] WebSocket upgraded successfully for room %s.", roomID)
+	log.Printf("[GameHandler] WebSocket upgraded successfully for passcode %s.", passcode)
 
 	// 認証メッセージを待つ
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) // 10秒のタイムアウト
@@ -338,24 +243,92 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 
 	// タイムアウトを解除
 	conn.SetReadDeadline(time.Time{})
-	log.Printf("[GameHandler] Auth completed, registering client %s to room %s", userID, roomID)
+	log.Printf("[GameHandler] Auth completed, registering client %s to passcode %s", userID, passcode)
 
 	// SessionManager に新しいWebSocket接続を登録
-	err = h.sessionManager.RegisterClient(roomID, userID, conn)
+	err = h.sessionManager.RegisterClient(passcode, userID, conn)
 	if err != nil {
-		log.Printf("[GameHandler] Failed to register client %s to room %s: %v", userID, roomID, err)
+		log.Printf("[GameHandler] Failed to register client %s to passcode %s: %v", userID, passcode, err)
 		conn.Close() // 登録失敗時はコネクションを閉じる
 		return
 	}
 
-	log.Printf("[GameHandler] Successfully registered client %s to room %s", userID, roomID)
+	log.Printf("[GameHandler] Successfully registered client %s to passcode %s", userID, passcode)
 	
 	// ゲーム開始条件のチェックはSessionManager.Register内で自動実行されるため、ここでは不要
-	log.Printf("[GameHandler] Client registration completed for room %s", roomID)
+	log.Printf("[GameHandler] Client registration completed for passcode %s", passcode)
 
 	// RegisterClient内で readPump と writePump ゴルーチンが開始されるため、
 	// ここではそれ以上の処理は不要です。ハンドラーは単にコネクションを引き渡すだけです。
 	// コネクションが閉じられるまで、このハンドラーは「ぶら下がる」ことになります。
+}
+
+// JoinRoomByPasscode は合言葉を使ってルームに参加するHTTPハンドラーです。
+// URLパラメータから合言葉を、リクエストボディからデッキIDを取得し、
+// セッションマネージャーに合言葉でのマッチングを依頼します。
+func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[GameHandler] JoinRoomByPasscode called")
+	
+	// ユーザー認証情報をコンテキストから取得する
+	userID, err := ExtractUserIDFromContext(r)
+	if err != nil {
+		log.Printf("[GameHandler] Failed to extract user ID for passcode join: %v", err)
+		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
+		return
+	}
+	log.Printf("[GameHandler] User ID extracted for passcode join: %s", userID)
+
+	vars := mux.Vars(r)
+	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
+	if passcode == "" {
+		log.Printf("[GameHandler] Missing passcode in join request")
+		WriteErrorResponse(w, http.StatusBadRequest, "合言葉が必要です")
+		return
+	}
+	log.Printf("[GameHandler] Passcode for join: %s", passcode)
+
+	// リクエストボディからプレイヤーのデッキIDを取得
+	var req struct {
+		DeckID string `json:"deck_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[GameHandler] Failed to parse passcode join request body: %v", err)
+		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディの解析に失敗しました")
+		return
+	}
+	if req.DeckID == "" {
+		log.Printf("[GameHandler] Missing deck_id in passcode join request")
+		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
+		return
+	}
+	log.Printf("[GameHandler] Request parsed for passcode join, deck_id: %s", req.DeckID)
+
+	log.Printf("[GameHandler] Calling sessionManager.JoinRoomByPasscode for user %s, passcode %s, deck %s", userID, passcode, req.DeckID)
+	
+	// セッションマネージャーに合言葉でのマッチングを依頼
+	sessionID, isNewSession, err := h.sessionManager.JoinRoomByPasscode(passcode, userID, req.DeckID)
+	if err != nil {
+		log.Printf("[GameHandler] User %s failed to join passcode %s: %v", userID, passcode, err)
+		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("合言葉でのマッチングに失敗しました: %v", err))
+		return
+	}
+
+	var message string
+	if isNewSession {
+		message = fmt.Sprintf("合言葉「%s」でルームを作成しました。相手の参加をお待ちください。", passcode)
+		log.Printf("[GameHandler] User %s created new session with passcode %s", userID, passcode)
+	} else {
+		message = fmt.Sprintf("合言葉「%s」のルームに参加しました。", passcode)
+		log.Printf("[GameHandler] User %s joined existing session with passcode %s", userID, passcode)
+	}
+
+	log.Printf("[GameHandler] User %s successfully matched with passcode %s (session: %s)", userID, passcode, sessionID)
+	WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"success":        true,
+		"message":        message,
+		"session_id":     sessionID,
+		"is_new_session": isNewSession,
+	})
 }
 
 

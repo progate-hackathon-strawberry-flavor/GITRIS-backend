@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket" // WebSocketライブラリのインポート
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database" // データベースサービスをインポート
@@ -56,12 +55,14 @@ func (c *Client) SafeClose() {
 // LightweightGameState はWebSocket送信用の軽量なゲーム状態構造体です。
 // GameSessionの全情報ではなく、クライアントが必要とする最小限の情報のみを含みます。
 type LightweightGameState struct {
-	ID        string                    `json:"id"`
-	Player1   *LightweightPlayerState   `json:"player1"`
-	Player2   *LightweightPlayerState   `json:"player2"`
-	Status    string                    `json:"status"`
-	StartedAt time.Time                 `json:"started_at,omitempty"`
-	EndedAt   time.Time                 `json:"ended_at,omitempty"`
+	ID             string                    `json:"id"`
+	Player1        *LightweightPlayerState   `json:"player1"`
+	Player2        *LightweightPlayerState   `json:"player2"`
+	Status         string                    `json:"status"`
+	StartedAt      time.Time                 `json:"started_at,omitempty"`
+	EndedAt        time.Time                 `json:"ended_at,omitempty"`
+	TimeLimit      int                       `json:"time_limit"`       // 制限時間（秒）
+	RemainingTime  int                       `json:"remaining_time"`   // 残り時間（秒）
 }
 
 // LightweightPlayerState はプレイヤー状態の軽量版です。
@@ -82,7 +83,7 @@ type LightweightPlayerState struct {
 // SessionManager はゲームセッションとWebSocketクライアント接続の全体を管理します。
 // これはアプリケーション内でシングルトンとして動作することが想定されます。
 type SessionManager struct {
-	sessions    map[string]*GameSession // roomID -> GameSession のマップ (アクティブなゲームセッションを保持)
+	sessions    map[string]*GameSession // 合言葉 -> GameSession のマップ (アクティブなゲームセッションを保持)
 	clients     map[string]*Client             // userID -> Client のマップ (現在接続中の全WebSocketクライアント)
 	register    chan *Client                   // 新しいクライアント接続の登録リクエスト用チャネル
 	unregister  chan *Client                   // クライアント切断の登録解除リクエスト用チャネル
@@ -136,17 +137,17 @@ func (sm *SessionManager) Run() {
 			sm.mu.Lock()
 			sm.clients[client.UserID] = client
 			sm.mu.Unlock()
-			log.Printf("[SessionManager] Client registered: %s (Room: %s)", client.UserID, client.RoomID)
+			log.Printf("[SessionManager] Client registered: %s (Passcode: %s)", client.UserID, client.RoomID)
 
 			// クライアント登録後に最新の状態をブロードキャスト（非同期実行）
-			go func(roomID string) {
-				sm.BroadcastGameState(roomID)
+			go func(passcode string) {
+				sm.BroadcastGameState(passcode)
 			}(client.RoomID)
 
 			// クライアント登録後、セッションが開始可能かチェック（非同期実行、少し遅延させてレースコンディション回避）
-			go func(roomID string) {
+			go func(passcode string) {
 				time.Sleep(50 * time.Millisecond) // 50ms遅延でレースコンディション回避
-				sm.CheckAndStartGame(roomID)
+				sm.CheckAndStartGame(passcode)
 			}(client.RoomID)
 
 		case client := <-sm.unregister:
@@ -156,7 +157,7 @@ func (sm *SessionManager) Run() {
 				// Sendチャネルを安全に閉じる
 				registeredClient.SafeClose()
 				delete(sm.clients, client.UserID)
-				log.Printf("[SessionManager] Client unregistered: %s (Room: %s)", client.UserID, client.RoomID)
+				log.Printf("[SessionManager] Client unregistered: %s (Passcode: %s)", client.UserID, client.RoomID)
 			} else {
 				log.Printf("[SessionManager] Attempted to unregister non-existent client: %s", client.UserID)
 			}
@@ -167,17 +168,17 @@ func (sm *SessionManager) Run() {
 			session, ok := sm.sessions[client.RoomID]
 			sm.mu.RUnlock()
 			if ok && session.Status == "playing" {
-				log.Printf("[SessionManager] Player %s left room %s during game. Ending session.", client.UserID, client.RoomID)
+				log.Printf("[SessionManager] Player %s left passcode %s during game. Ending session.", client.UserID, client.RoomID)
 				sm.EndGameSession(client.RoomID)
 			} else if ok {
 				// ゲーム中でない場合は、セッション状態を更新してブロードキャスト
-				log.Printf("[SessionManager] Player %s left room %s (status: %s)", client.UserID, client.RoomID, session.Status)
+				log.Printf("[SessionManager] Player %s left passcode %s (status: %s)", client.UserID, client.RoomID, session.Status)
 				sm.BroadcastGameState(client.RoomID)
 			}
 
 		case event := <-sm.inputEvents:
 			// プレイヤーからの入力イベントを処理
-			// クライアントのルームIDを取得
+			// クライアントの合言葉を取得
 			sm.mu.RLock()
 			client, clientExists := sm.clients[event.UserID]
 			sm.mu.RUnlock()
@@ -192,8 +193,8 @@ func (sm *SessionManager) Run() {
 			sm.mu.RUnlock()
 
 			if !ok || session.Status != "playing" {
-				log.Printf("[SessionManager] Received input for non-existent or non-playing room %s from user %s", client.RoomID, event.UserID)
-				continue // 存在しないか、プレイ中でない部屋への入力は無視
+				log.Printf("[SessionManager] Received input for non-existent or non-playing passcode %s from user %s", client.RoomID, event.UserID)
+				continue // 存在しないか、プレイ中でない合言葉への入力は無視
 			}
 
 			// どちらのプレイヤーからの入力か判定し、対応するゲーム状態を更新
@@ -203,15 +204,15 @@ func (sm *SessionManager) Run() {
 			} else if session.Player2 != nil && session.Player2.UserID == event.UserID {
 				targetPlayerState = session.Player2
 			} else {
-				log.Printf("[SessionManager] Input from unknown user %s in room %s", event.UserID, client.RoomID)
+				log.Printf("[SessionManager] Input from unknown user %s in passcode %s", event.UserID, client.RoomID)
 				continue
 			}
 
 			// ゲームロジックを適用し、状態が実際に変更されたか確認
 			if ApplyPlayerInput(targetPlayerState, event.Action) {
 				// 自分の操作は即座に自分にだけ送信（レスポンシブ感を維持）
-				go func(userID, roomID string) {
-					sm.BroadcastToSpecificClient(userID, roomID)
+				go func(userID, passcode string) {
+					sm.BroadcastToSpecificClient(userID, passcode)
 				}(event.UserID, session.ID)
 				
 				// 相手への更新は1秒間隔のブロードキャストに任せる（負荷軽減）
@@ -220,8 +221,8 @@ func (sm *SessionManager) Run() {
 				// プレイヤーのゲームが終了したか判定（ゲームオーバーは即座に通知）
 				if targetPlayerState.IsGameOver {
 					// ゲームオーバーは重要なので即座にブロードキャスト
-					go func(roomID string) {
-						sm.BroadcastGameState(roomID)
+					go func(passcode string) {
+						sm.BroadcastGameState(passcode)
 					}(session.ID)
 					sm.EndGameSession(session.ID)
 				}
@@ -240,6 +241,13 @@ func (sm *SessionManager) Run() {
 
 			// ロック外で処理を実行（パフォーマンス改善）
 			for _, session := range activeSessions {
+				// 時間制限チェック（100秒）
+				if session.IsTimeUp() {
+					log.Printf("[SessionManager] Time limit reached for passcode %s, ending game", session.ID)
+					sm.EndGameSession(session.ID)
+					continue // 時間切れのセッションは処理をスキップ
+				}
+
 				// プレイヤー1の自動落下
 				if session.Player1 != nil && !session.Player1.IsGameOver {
 					AutoFall(session.Player1)
@@ -298,135 +306,14 @@ func (sm *SessionManager) Run() {
 	}
 }
 
-// CreateSession は新しいゲームセッションを作成します。
-//
-// Parameters:
-//   player1ID   : プレイヤー1のユーザーID
-//   player1DeckID : プレイヤー1が使用するデッキのUUID
-// Returns:
-//   string: 作成されたルームのID
-//   error : エラーが発生した場合
-func (sm *SessionManager) CreateSession(player1ID, player1DeckID string) (string, error) {
-	log.Printf("[SessionManager] CreateSession called with player1ID: %s, player1DeckID: %s", player1ID, player1DeckID)
-	
-	sm.mu.Lock()
 
-	roomID := uuid.New().String() // 新しいルームIDを生成
-	log.Printf("[SessionManager] Generated roomID: %s", roomID)
-
-	// データベースからプレイヤー1のデッキデータをロード (TODO: database/database_service.goに実装)
-	log.Printf("[SessionManager] Attempting to get deck for player1: %s", player1DeckID)
-	player1Deck, err := sm.dbService.GetDeckByID(player1DeckID)
-	if err != nil {
-		log.Printf("[SessionManager] Failed to get player1 deck %s: %v", player1DeckID, err)
-		sm.mu.Unlock() // エラー時にアンロック
-		return "", fmt.Errorf("failed to get player1 deck: %w", err)
-	}
-	log.Printf("[SessionManager] Successfully retrieved deck for player1")
-
-	// 新しいゲームセッションを初期化
-	log.Printf("[SessionManager] Creating new GameSession...")
-	session, err := NewGameSession(roomID, player1ID, player1Deck, sm.deckRepo)
-	if err != nil {
-		log.Printf("[SessionManager] Failed to create GameSession: %v", err)
-		sm.mu.Unlock()
-		return "", fmt.Errorf("failed to create game session: %w", err)
-	}
-	sm.sessions[roomID] = session // セッションマネージャーのマップに追加
-	log.Printf("[SessionManager] GameSession created and added to sessions map")
-
-	// データベースにセッションを記録 (game_sessions テーブル)
-	// TODO: sm.dbService.CreateGameSession(session) を実装
-	// err = sm.dbService.CreateGameSession(session)
-	// if err != nil {
-	// 	delete(sm.sessions, roomID) // DB記録失敗時はセッションを削除
-	// 	return "", fmt.Errorf("failed to save game session to DB: %w", err)
-	// }
-	log.Printf("[SessionManager] Created new game session: %s for player %s", roomID, player1ID)
-	
-	// mutexをアンロックしてからブロードキャスト
-	sm.mu.Unlock()
-	
-	// セッション作成後に状態をブロードキャスト
-	log.Printf("[SessionManager] Broadcasting game state for room: %s", roomID)
-	sm.BroadcastGameState(roomID)
-	
-	return roomID, nil
-}
-
-// JoinSession は既存のゲームセッションにプレイヤーを参加させます。
-//
-// Parameters:
-//   roomID      : 参加するルームのID
-//   player2ID   : プレイヤー2のユーザーID
-//   player2DeckID : プレイヤー2が使用するデッキのUUID
-// Returns:
-//   error : エラーが発生した場合
-func (sm *SessionManager) JoinSession(roomID, player2ID, player2DeckID string) error {
-	log.Printf("[SessionManager] JoinSession called with roomID: %s, player2ID: %s, player2DeckID: %s", roomID, player2ID, player2DeckID)
-	
-	sm.mu.Lock()
-
-	session, ok := sm.sessions[roomID]
-	if !ok {
-		log.Printf("[SessionManager] Room %s not found for player2 %s", roomID, player2ID)
-		sm.mu.Unlock()
-		return errors.New("room not found")
-	}
-	log.Printf("[SessionManager] Room %s found, current status: %s", roomID, session.Status)
-	
-	if session.Status != "waiting" {
-		log.Printf("[SessionManager] Room %s is not waiting (status: %s) for player2 %s", roomID, session.Status, player2ID)
-		sm.mu.Unlock()
-		return errors.New("room is not waiting for players")
-	}
-	
-	if session.Player2 != nil {
-		log.Printf("[SessionManager] Room %s already has player2, cannot add %s", roomID, player2ID)
-		sm.mu.Unlock()
-		return errors.New("room is already full") // 既に2人目が参加している
-	}
-	
-	if session.Player1 != nil && session.Player1.UserID == player2ID {
-		log.Printf("[SessionManager] Player %s cannot join their own room %s", player2ID, roomID)
-		sm.mu.Unlock()
-		return errors.New("cannot join your own room") // 自分自身の部屋には参加できない
-	}
-
-	log.Printf("[SessionManager] Validation passed, getting deck for player2: %s", player2DeckID)
-	
-	// データベースからプレイヤー2のデッキデータをロード (TODO: database/database_service.goに実装)
-	player2Deck, err := sm.dbService.GetDeckByID(player2DeckID)
-	if err != nil {
-		log.Printf("[SessionManager] Failed to get player2 deck %s: %v", player2DeckID, err)
-		sm.mu.Unlock()
-		return fmt.Errorf("failed to get player2 deck: %w", err)
-	}
-	log.Printf("[SessionManager] Successfully retrieved deck for player2: %s", player2DeckID)
-
-	log.Printf("[SessionManager] Setting player2 for room %s", roomID)
-	session.SetPlayer2(player2ID, player2Deck, sm.deckRepo) // プレイヤー2のゲーム状態を設定
-
-	// データベースの game_participants テーブルを更新
-	// TODO: sm.dbService.AddParticipantToSession(roomID, player2ID, player2DeckID) を実装
-	log.Printf("[SessionManager] Player %s joined room %s successfully", player2ID, roomID)
-
-	// mutexをアンロックしてからブロードキャスト
-	sm.mu.Unlock()
-
-	// プレイヤー参加後に状態をブロードキャスト
-	log.Printf("[SessionManager] Broadcasting game state after player2 join for room: %s", roomID)
-	sm.BroadcastGameState(roomID)
-
-	return nil
-}
 
 // CheckAndStartGame はセッションが開始条件を満たしているかチェックし、満たしていればゲームを開始します。
 //
 // Parameters:
-//   roomID : チェックするルームのID
-func (sm *SessionManager) CheckAndStartGame(roomID string) {
-	log.Printf("[SessionManager] CheckAndStartGame called for room: %s", roomID)
+//   passcode : チェックする合言葉
+func (sm *SessionManager) CheckAndStartGame(passcode string) {
+	log.Printf("[SessionManager] CheckAndStartGame called for passcode: %s", passcode)
 	
 	sm.mu.Lock()
 	defer sm.mu.Unlock() // defer で必ずアンロックされるように変更
@@ -435,72 +322,68 @@ func (sm *SessionManager) CheckAndStartGame(roomID string) {
 	sessionCount := len(sm.sessions)
 	log.Printf("[SessionManager] Current session count: %d", sessionCount)
 	
-	session, ok := sm.sessions[roomID]
+	session, ok := sm.sessions[passcode]
 	if !ok {
-		log.Printf("[SessionManager] Room %s not found in CheckAndStartGame (total sessions: %d)", roomID, sessionCount)
-		// デバッグ用: 存在するセッションIDをログ出力
-		var existingRooms []string
-		for id := range sm.sessions {
-			existingRooms = append(existingRooms, id)
+		log.Printf("[SessionManager] Passcode %s not found in CheckAndStartGame (total sessions: %d)", passcode, sessionCount)
+		// デバッグ用: 存在するセッションパスコードをログ出力
+		var existingPasscodes []string
+		for code := range sm.sessions {
+			existingPasscodes = append(existingPasscodes, code)
 		}
-		log.Printf("[SessionManager] Existing room IDs: %v", existingRooms)
-		return // ルームが存在しない
+		log.Printf("[SessionManager] Existing passcodes: %v", existingPasscodes)
+		return // セッションが存在しない
 	}
 	
 	// セッションの状態をチェック（削除された可能性を考慮）
 	if session == nil {
-		log.Printf("[SessionManager] Session for room %s is nil", roomID)
+		log.Printf("[SessionManager] Session for passcode %s is nil", passcode)
 		return
 	}
 	
-	log.Printf("[SessionManager] Room %s status: %s", roomID, session.Status)
+	log.Printf("[SessionManager] Passcode %s status: %s", passcode, session.Status)
 	
 	// 各条件をチェック
 	hasPlayer1 := session.Player1 != nil
 	hasPlayer2 := session.Player2 != nil
 	
-	log.Printf("[SessionManager] Room %s - hasPlayer1: %v, hasPlayer2: %v", roomID, hasPlayer1, hasPlayer2)
+	log.Printf("[SessionManager] Passcode %s - hasPlayer1: %v, hasPlayer2: %v", passcode, hasPlayer1, hasPlayer2)
 	
 	if hasPlayer1 {
-		log.Printf("[SessionManager] Room %s - Player1 ID: %s", roomID, session.Player1.UserID)
+		log.Printf("[SessionManager] Passcode %s - Player1 ID: %s", passcode, session.Player1.UserID)
 	}
 	if hasPlayer2 {
-		log.Printf("[SessionManager] Room %s - Player2 ID: %s", roomID, session.Player2.UserID)
+		log.Printf("[SessionManager] Passcode %s - Player2 ID: %s", passcode, session.Player2.UserID)
 	}
 	
 	// WebSocket接続をチェック
 	var player1Connected, player2Connected bool
 	if hasPlayer1 {
 		player1Connected = sm.clients[session.Player1.UserID] != nil
-		log.Printf("[SessionManager] Room %s - Player1 (%s) connected: %v", roomID, session.Player1.UserID, player1Connected)
+		log.Printf("[SessionManager] Passcode %s - Player1 (%s) connected: %v", passcode, session.Player1.UserID, player1Connected)
 	}
 	if hasPlayer2 {
 		player2Connected = sm.clients[session.Player2.UserID] != nil
-		log.Printf("[SessionManager] Room %s - Player2 (%s) connected: %v", roomID, session.Player2.UserID, player2Connected)
+		log.Printf("[SessionManager] Passcode %s - Player2 (%s) connected: %v", passcode, session.Player2.UserID, player2Connected)
 	}
 	
 	isWaiting := session.Status == "waiting"
-	log.Printf("[SessionManager] Room %s - isWaiting: %v", roomID, isWaiting)
+	log.Printf("[SessionManager] Passcode %s - isWaiting: %v", passcode, isWaiting)
 
 	// 2人のプレイヤーが揃っていて、両方がWebSocketに接続済みであればゲーム開始
-	// TODO: このロジックはより複雑になる可能性あり（例: 両プレイヤーが「準備OK」ボタンを押す必要がある場合など）
 	if hasPlayer1 && hasPlayer2 && player1Connected && player2Connected && isWaiting {
-		log.Printf("[SessionManager] All conditions met, starting game for room %s", roomID)
+		log.Printf("[SessionManager] All conditions met, starting game for passcode %s", passcode)
 		
 		session.Status = "playing"
 		session.StartedAt = time.Now()
-		log.Printf("[SessionManager] Game session %s started! Players: %s vs %s", roomID, session.Player1.UserID, session.Player2.UserID)
+		log.Printf("[SessionManager] Game session %s started! Players: %s vs %s", passcode, session.Player1.UserID, session.Player2.UserID)
 
-		// データベースの game_sessions テーブルを更新
-		// TODO: sm.dbService.UpdateGameSessionStatus(roomID, "playing", session.StartedAt) を実装
-		
 		// ゲーム開始をクライアントに通知（非同期実行）
-		go func(roomID string) {
-			sm.BroadcastGameState(roomID) 
-		}(roomID)
+		go func(passcode string) {
+			sm.BroadcastGameState(passcode) 
+		}(passcode)
 		return
 	} else {
-		log.Printf("[SessionManager] Game start conditions not met for room %s", roomID)
+		log.Printf("[SessionManager] Game start conditions not met for passcode %s", passcode)
 		log.Printf("[SessionManager] - hasPlayer1: %v, hasPlayer2: %v, player1Connected: %v, player2Connected: %v, isWaiting: %v", 
 			hasPlayer1, hasPlayer2, player1Connected, player2Connected, isWaiting)
 	}
@@ -509,13 +392,13 @@ func (sm *SessionManager) CheckAndStartGame(roomID string) {
 // RegisterClient は新しいWebSocketクライアントをSessionManagerに登録します。
 //
 // Parameters:
-//   roomID : クライアントが参加するルームのID
+//   passcode : クライアントが参加する合言葉
 //   userID : クライアントのユーザーID
 //   conn   : WebSocketコネクション
 // Returns:
 //   error: エラーが発生した場合
-func (sm *SessionManager) RegisterClient(roomID, userID string, conn *websocket.Conn) error {
-	log.Printf("[SessionManager] RegisterClient called for user %s in room %s", userID, roomID)
+func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocket.Conn) error {
+	log.Printf("[SessionManager] RegisterClient called for user %s with passcode %s", userID, passcode)
 
 	// 既存の接続があれば先にクリーンアップ（再接続対応）
 	sm.mu.Lock()
@@ -524,9 +407,9 @@ func (sm *SessionManager) RegisterClient(roomID, userID string, conn *websocket.
 		if existingClient.Conn != nil {
 			existingClient.Conn.Close()
 		}
-		if existingClient.Send != nil {
-			close(existingClient.Send)
-		}
+		// 安全なチャネル閉じ方を使用
+		existingClient.SafeClose()
+		delete(sm.clients, userID) // 明示的に削除
 	}
 
 	// 新しいクライアントを作成
@@ -534,7 +417,7 @@ func (sm *SessionManager) RegisterClient(roomID, userID string, conn *websocket.
 		UserID: userID,
 		Conn:   conn,
 		Send:   make(chan []byte, 512), // バッファサイズをさらに増加
-		RoomID: roomID,
+		RoomID: passcode, // 合言葉をRoomIDフィールドに格納
 	}
 	sm.clients[userID] = client
 	sm.mu.Unlock()
@@ -554,7 +437,7 @@ func (sm *SessionManager) RegisterClient(roomID, userID string, conn *websocket.
 	// クライアント登録イベントを SessionManager に送信
 	sm.register <- client
 
-	log.Printf("[SessionManager] Client %s registered for room %s", userID, roomID)
+	log.Printf("[SessionManager] Client %s registered for passcode %s", userID, passcode)
 	return nil
 }
 
@@ -714,10 +597,10 @@ func (c *Client) writePump() {
 //
 // Parameters:
 //   userID : 送信対象のユーザーID
-//   roomID : ルームID
-func (sm *SessionManager) BroadcastToSpecificClient(userID, roomID string) {
+//   passcode : 合言葉
+func (sm *SessionManager) BroadcastToSpecificClient(userID, passcode string) {
 	sm.mu.RLock()
-	session, ok := sm.sessions[roomID]
+	session, ok := sm.sessions[passcode]
 	if !ok {
 		sm.mu.RUnlock()
 		return
@@ -744,17 +627,17 @@ func (sm *SessionManager) BroadcastToSpecificClient(userID, roomID string) {
 	}
 }
 
-// BroadcastGameState は指定された roomID のゲームセッションの現在の状態を、
+// BroadcastGameState は指定された passcode のゲームセッションの現在の状態を、
 // そのセッションに参加している全てのクライアントに WebSocket でブロードキャストします。
 //
 // Parameters:
-//   roomID : ブロードキャスト対象のルームID
-func (sm *SessionManager) BroadcastGameState(roomID string) {
+//   passcode : ブロードキャスト対象の合言葉
+func (sm *SessionManager) BroadcastGameState(passcode string) {
 	// ブロードキャストスロットリング：対戦相手の動きは1秒おきで十分
 	const minBroadcastInterval = 1000 * time.Millisecond // 1秒間隔（大幅負荷軽減）
 	
 	sm.broadcastMu.Lock()
-	lastTime, exists := sm.lastBroadcast[roomID]
+	lastTime, exists := sm.lastBroadcast[passcode]
 	now := time.Now()
 	
 	// 前回のブロードキャストから十分な時間が経過していない場合はスキップ
@@ -763,55 +646,65 @@ func (sm *SessionManager) BroadcastGameState(roomID string) {
 		return
 	}
 	
-	sm.lastBroadcast[roomID] = now
+	sm.lastBroadcast[passcode] = now
 	sm.broadcastMu.Unlock()
 	
 	// ログ出力を削減（パフォーマンス改善）
-	// log.Printf("[SessionManager] BroadcastGameState called for room: %s", roomID)
+	// log.Printf("[SessionManager] BroadcastGameState called for passcode: %s", passcode)
 	sm.mu.RLock()
-	session, ok := sm.sessions[roomID]
+	session, ok := sm.sessions[passcode]
 	sm.mu.RUnlock()
 	if !ok {
-		log.Printf("[SessionManager] Attempted to broadcast for non-existent room: %s", roomID)
+		log.Printf("[SessionManager] Attempted to broadcast for non-existent passcode: %s", passcode)
 		return
 	}
-	// log.Printf("[SessionManager] Session found for room %s, status: %s", roomID, session.Status)
+	// log.Printf("[SessionManager] Session found for passcode %s, status: %s", passcode, session.Status)
 
 	// ゲーム状態更新イベントを SessionManager のブロードキャストチャネルに送信
 	// チャネルがフルの場合は最新の状態のみ保持（負荷軽減）
 	select {
 	case sm.broadcast <- &GameStateEvent{
-		RoomID: roomID,
+		RoomID: passcode, // 合言葉を使用
 		State:  session, // セッション全体の状態を送信
 	}:
-		// log.Printf("[SessionManager] Broadcast event sent to channel for room: %s", roomID)
+		// log.Printf("[SessionManager] Broadcast event sent to channel for passcode: %s", passcode)
 	default:
-		log.Printf("[SessionManager] Broadcast channel full, skipping update for room: %s", roomID)
+		log.Printf("[SessionManager] Broadcast channel full, skipping update for passcode: %s", passcode)
 	}
 }
 
 // EndGameSession はゲームセッションを終了させ、結果をデータベースに記録し、セッションをクリーンアップします。
 //
 // Parameters:
-//   roomID : 終了するルームのID
-func (sm *SessionManager) EndGameSession(roomID string) {
+//   passcode : 終了する合言葉
+func (sm *SessionManager) EndGameSession(passcode string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[roomID]
+	session, ok := sm.sessions[passcode]
 	if !ok {
-		log.Printf("[SessionManager] EndGameSession called for non-existent room: %s", roomID)
-		return // ルームが存在しない
+		log.Printf("[SessionManager] EndGameSession called for non-existent passcode: %s", passcode)
+		return // 合言葉が存在しない
 	}
 
 	if session.Status == "finished" {
-		log.Printf("[SessionManager] EndGameSession called for already finished room: %s", roomID)
+		log.Printf("[SessionManager] EndGameSession called for already finished passcode: %s", passcode)
 		return // 既に終了済み
 	}
 
 	session.Status = "finished" // ステータスを「終了済み」に設定
 	session.EndedAt = time.Now() // 終了日時を記録
-	log.Printf("[SessionManager] Game session %s ended.", roomID)
+	
+	// 終了理由を判定してログ出力
+	if session.IsTimeUp() {
+		log.Printf("[SessionManager] Game session %s ended by TIME LIMIT (100 seconds).", passcode)
+	} else if session.Player1 != nil && session.Player1.IsGameOver {
+		log.Printf("[SessionManager] Game session %s ended by GAME OVER - Player1: %s", passcode, session.Player1.UserID)
+	} else if session.Player2 != nil && session.Player2.IsGameOver {
+		log.Printf("[SessionManager] Game session %s ended by GAME OVER - Player2: %s", passcode, session.Player2.UserID)
+	} else {
+		log.Printf("[SessionManager] Game session %s ended by OTHER REASON.", passcode)
+	}
 
 	// ゲーム結果をデータベースに記録する (TODO: database/database_service.go に実装)
 	// 例: sm.dbService.UpdateGameSessionResult(session)
@@ -820,15 +713,15 @@ func (sm *SessionManager) EndGameSession(roomID string) {
 	// クライアントにゲーム終了を通知 (最後の状態をブロードキャスト)
 	// mutexをアンロックしてからブロードキャスト（デッドロック回避）
 	sm.mu.Unlock()
-	sm.BroadcastGameState(roomID)
+	sm.BroadcastGameState(passcode)
 	sm.mu.Lock()
 
 	// セッションに関連するクライアントのクリーンアップ
 	var clientsToUnregister []*Client
 	for userID, client := range sm.clients {
-		if client.RoomID == roomID {
+		if client.RoomID == passcode {
 			clientsToUnregister = append(clientsToUnregister, client)
-			log.Printf("[SessionManager] Marking client %s for cleanup from ended room %s", userID, roomID)
+			log.Printf("[SessionManager] Marking client %s for cleanup from ended passcode %s", userID, passcode)
 		}
 	}
 
@@ -837,20 +730,20 @@ func (sm *SessionManager) EndGameSession(roomID string) {
 		// Sendチャネルを安全に閉じる
 		client.SafeClose()
 		delete(sm.clients, client.UserID)
-		log.Printf("[SessionManager] Cleaned up client %s from ended room %s", client.UserID, roomID)
+		log.Printf("[SessionManager] Cleaned up client %s from ended passcode %s", client.UserID, passcode)
 	}
 
 	// セッションマネージャーのマップからセッションを削除
-	delete(sm.sessions, roomID)
-	log.Printf("[SessionManager] Removed session %s from sessions map", roomID)
+	delete(sm.sessions, passcode)
+	log.Printf("[SessionManager] Removed session %s from sessions map", passcode)
 }
 
-// GetGameSession は指定されたルームIDのゲームセッションを取得します。
+// GetGameSession は指定された合言葉のゲームセッションを取得します。
 // 主にハンドラーからセッション情報を取得するために使用されます。
-func (sm *SessionManager) GetGameSession(roomID string) (*GameSession, bool) {
+func (sm *SessionManager) GetGameSession(passcode string) (*GameSession, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	session, ok := sm.sessions[roomID]
+	session, ok := sm.sessions[passcode]
 	return session, ok
 }
 
@@ -878,4 +771,88 @@ func (sm *SessionManager) Shutdown() {
 	sm.mu.Unlock()
 	
 	log.Printf("[SessionManager] シャットダウン完了")
+} 
+
+// JoinRoomByPasscode は合言葉を使ってルームに参加します。
+// 合言葉のセッションが存在しない場合は新しく作成し、存在する場合は参加します。
+//
+// Parameters:
+//   passcode     : ユーザーが入力した合言葉
+//   playerID     : 参加するプレイヤーのユーザーID
+//   playerDeckID : プレイヤーが使用するデッキのUUID
+// Returns:
+//   string: セッションID（合言葉と同じ）
+//   bool: 新しくセッションを作成したかどうか（true: 作成、false: 既存セッションに参加）
+//   error: エラーが発生した場合
+func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID string) (string, bool, error) {
+	log.Printf("[SessionManager] JoinRoomByPasscode called with passcode: %s, playerID: %s, playerDeckID: %s", passcode, playerID, playerDeckID)
+	
+	// 合言葉のバリデーション
+	if passcode == "" {
+		return "", false, errors.New("合言葉が必要です")
+	}
+	if len(passcode) < 3 || len(passcode) > 20 {
+		return "", false, errors.New("合言葉は3文字以上20文字以下で入力してください")
+	}
+	
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, exists := sm.sessions[passcode]
+	
+	if !exists {
+		// セッションが存在しない場合、新しく作成（プレイヤー1として）
+		log.Printf("[SessionManager] Creating new session for passcode: %s", passcode)
+		
+		// データベースからプレイヤーのデッキデータをロード
+		playerDeck, err := sm.dbService.GetDeckByID(playerDeckID)
+		if err != nil {
+			log.Printf("[SessionManager] Failed to get player deck %s: %v", playerDeckID, err)
+			return "", false, fmt.Errorf("failed to get player deck: %w", err)
+		}
+		
+		// 新しいゲームセッションを初期化（IDは合言葉を使用）
+		newSession, err := NewGameSession(passcode, playerID, playerDeck, sm.deckRepo)
+		if err != nil {
+			log.Printf("[SessionManager] Failed to create GameSession: %v", err)
+			return "", false, fmt.Errorf("failed to create game session: %w", err)
+		}
+		sm.sessions[passcode] = newSession
+		log.Printf("[SessionManager] Created new game session with passcode: %s for player %s", passcode, playerID)
+		
+		return passcode, true, nil
+		
+	} else {
+		// セッションが存在する場合、プレイヤー2として参加
+		log.Printf("[SessionManager] Session found for passcode: %s, current status: %s", passcode, session.Status)
+		
+		if session.Status != "waiting" {
+			log.Printf("[SessionManager] Session %s is not waiting (status: %s)", passcode, session.Status)
+			return "", false, errors.New("このルームは既にゲーム中または終了しています")
+		}
+		
+		if session.Player2 != nil {
+			log.Printf("[SessionManager] Session %s already has player2", passcode)
+			return "", false, errors.New("このルームは既に満室です")
+		}
+		
+		if session.Player1 != nil && session.Player1.UserID == playerID {
+			log.Printf("[SessionManager] Player %s cannot join their own room %s", playerID, passcode)
+			return "", false, errors.New("自分が作成したルームには参加できません")
+		}
+
+		log.Printf("[SessionManager] Adding player2 to existing session: %s", passcode)
+		
+		// データベースからプレイヤー2のデッキデータをロード
+		playerDeck, err := sm.dbService.GetDeckByID(playerDeckID)
+		if err != nil {
+			log.Printf("[SessionManager] Failed to get player2 deck %s: %v", playerDeckID, err)
+			return "", false, fmt.Errorf("failed to get player2 deck: %w", err)
+		}
+
+		session.SetPlayer2(playerID, playerDeck, sm.deckRepo)
+		log.Printf("[SessionManager] Player %s joined session %s successfully", playerID, passcode)
+
+		return passcode, false, nil
+	}
 } 

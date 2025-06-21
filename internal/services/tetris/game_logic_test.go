@@ -101,9 +101,14 @@ func TestAutoFall(t *testing.T) {
 		}
 	}
 
-	// ピースがボードの底に着地するまで落下させる
-	for !state.IsGameOver && state.CurrentPiece != nil && !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
-		AutoFall(state)
+	// ピースがボードの底に着地するまで落下させる（無限ループ防止）
+	maxFalls := 100 // 安全のため最大落下回数を制限
+	fallCount := 0
+	for !state.IsGameOver && state.CurrentPiece != nil && !state.Board.HasCollision(state.CurrentPiece, 0, 1) && fallCount < maxFalls {
+		if !AutoFall(state) {
+			break // AutoFallがfalseを返したら（着地したら）ループを抜ける
+		}
+		fallCount++
 	}
 
 	// ピースが着地後、ボードにマージされ、新しいピースが生成されたことを確認

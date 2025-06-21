@@ -304,6 +304,10 @@
                         <span class="connection-status status-disconnected" id="connectionStatus">未接続</span>
                     </div>
                     <div class="status-item">
+                        <span class="status-label">合言葉:</span>
+                        <span class="status-value" id="passcodeStatus">未設定</span>
+                    </div>
+                    <div class="status-item">
                         <span class="status-label">ゲーム:</span>
                         <span class="status-value" id="gameStatus">待機中</span>
                     </div>
@@ -423,7 +427,7 @@
             <div class="control-section">
                 <h3>🔌 接続設定</h3>
                 <input type="text" id="serverUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
-                <input type="text" id="roomId" placeholder="ルームID">
+                <input type="text" id="passcode" placeholder="合言葉（3-20文字）" maxlength="20" minlength="3">
                 <input type="text" id="userId" placeholder="ユーザーID">
                 <input type="text" id="authToken" placeholder="認証トークン (Bearer ...)" style="width: calc(100% - 20px);">
                 <button onclick="connectWebSocket()">🔗 WebSocket接続</button>
@@ -446,10 +450,21 @@
             </div>
             
             <div class="control-section">
-                <h3>🏠 ルーム操作</h3>
-                <button onclick="createRoom()">🏗️ ルーム作成</button>
-                <button onclick="joinRoom()">🚪 ルーム参加</button>
+                <h3>🎯 合言葉マッチング</h3>
+                <div style="margin-bottom: 10px; font-size: 14px; color: #ccc;">
+                    🎯 <strong>合言葉マッチングの流れ：</strong><br>
+                    1️⃣ 合言葉を決めて「合言葉で入室」をクリック<br>
+                    2️⃣ 「WebSocket接続」で対戦ルームに接続<br>
+                    3️⃣ 同じ合言葉の相手が来たら自動でゲーム開始！
+                </div>
+                <button onclick="joinByPasscode()">🚀 合言葉で入室</button>
+                <div style="margin-top: 10px; font-size: 12px; color: #999;">
+                    ※合言葉は3文字以上20文字以下で入力してください<br>
+                    ※例：「テトリス」「対戦」「友達」など
+                </div>
             </div>
+            
+
             
             <div class="control-section">
                 <h3>📋 ログ</h3>
@@ -499,20 +514,25 @@
         
         // WebSocket接続
         function connectWebSocket() {
-            const roomId = document.getElementById('roomId').value;
-            const authToken = document.getElementById('authToken').value;
+            const passcode = document.getElementById('passcode').value;
+            const userId = document.getElementById('userId').value;
             
-            if (!roomId) {
-                alert('ルームIDを入力してください');
+            if (!passcode) {
+                alert('合言葉を入力してください');
                 return;
             }
             
-            if (!authToken) {
-                alert('認証トークンを入力してください');
+            if (passcode.length < 3 || passcode.length > 20) {
+                alert('合言葉は3文字以上20文字以下で入力してください');
                 return;
             }
             
-            const wsUrl = `ws://localhost:8080/api/game/ws/${roomId}`;
+            if (!userId) {
+                alert('ユーザーIDを入力してください');
+                return;
+            }
+            
+            const wsUrl = `ws://localhost:8080/api/game/ws/${passcode}`;
             log(`WebSocket接続を試行中: ${wsUrl}`);
             updateConnectionStatus('connecting');
             
@@ -522,10 +542,13 @@
                 log('WebSocket接続が開かれました');
                 updateConnectionStatus('connected');
                 
+                // 合言葉のステータスを更新
+                document.getElementById('passcodeStatus').textContent = passcode;
+                
                 // 認証メッセージを送信
                 const authMessage = {
                     type: 'auth',
-                    token: authToken
+                    token: document.getElementById('authToken').value
                 };
                 socket.send(JSON.stringify(authMessage));
                 log('認証メッセージを送信しました');
@@ -563,6 +586,7 @@
                 log(`WebSocket接続が閉じられました: ${event.code} - ${event.reason}`);
                 socket = null;
                 updateConnectionStatus('disconnected');
+                document.getElementById('passcodeStatus').textContent = '未設定';
             };
         }
         
@@ -890,40 +914,53 @@
             }
         }
         
-        // ルーム作成
-        async function createRoom() {
+
+        
+        // 合言葉でルームに参加
+        async function joinByPasscode() {
+            const passcode = document.getElementById('passcode').value;
             const userId = document.getElementById('userId').value;
             const authToken = document.getElementById('authToken').value;
+
+            if (!passcode) {
+                alert('合言葉を入力してください');
+                return;
+            }
             
+            if (passcode.length < 3 || passcode.length > 20) {
+                alert('合言葉は3文字以上20文字以下で入力してください');
+                return;
+            }
+
             if (!userId) {
                 alert('ユーザーIDを入力してください');
                 return;
             }
-            
+
             if (!authToken) {
                 alert('認証トークンを入力してください');
                 return;
             }
-            
+
             // まずデッキIDを取得
             const deckId = await getDeckId();
             if (!deckId) {
                 log('デッキIDの取得に失敗しました');
                 return;
             }
-            
+
             // 認証トークンにBearerプレフィックスが付いていない場合は追加
             let authHeader = authToken;
             if (!authToken.startsWith('Bearer ')) {
                 authHeader = `Bearer ${authToken}`;
             }
-            
+
             const headers = {
                 'Content-Type': 'application/json',
                 'Authorization': authHeader
             };
-            
-            fetch('/api/game/room', {
+
+            fetch(`/api/game/room/passcode/${passcode}/join`, {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({
@@ -931,64 +968,16 @@
                 })
             })
             .then(response => response.json())
-            .then(data => {
-                log(`ルーム作成結果: ${JSON.stringify(data)}`);
-                if (data.room_id) {
-                    document.getElementById('roomId').value = data.room_id;
-                }
-            })
+                         .then(data => {
+                 log(`合言葉でのルーム参加結果: ${JSON.stringify(data)}`);
+                 if (data.success) {
+                     log('合言葉でのマッチングが成功しました！WebSocketに接続してください。');
+                     // 合言葉のステータスを更新
+                     document.getElementById('passcodeStatus').textContent = `${passcode} (準備完了)`;
+                 }
+             })
             .catch(error => {
-                log(`ルーム作成エラー: ${error.message}`);
-            });
-        }
-        
-        // ルーム参加
-        async function joinRoom() {
-            const roomId = document.getElementById('roomId').value;
-            const userId = document.getElementById('userId').value;
-            const authToken = document.getElementById('authToken').value;
-            
-            if (!roomId || !userId) {
-                alert('ルームIDとユーザーIDを入力してください');
-                return;
-            }
-            
-            if (!authToken) {
-                alert('認証トークンを入力してください');
-                return;
-            }
-            
-            // まずデッキIDを取得
-            const deckId = await getDeckId();
-            if (!deckId) {
-                log('デッキIDの取得に失敗しました');
-                return;
-            }
-            
-            // 認証トークンにBearerプレフィックスが付いていない場合は追加
-            let authHeader = authToken;
-            if (!authToken.startsWith('Bearer ')) {
-                authHeader = `Bearer ${authToken}`;
-            }
-            
-            const headers = {
-                'Content-Type': 'application/json',
-                'Authorization': authHeader
-            };
-            
-            fetch(`/api/game/room/${roomId}/join`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    deck_id: deckId
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                log(`ルーム参加結果: ${JSON.stringify(data)}`);
-            })
-            .catch(error => {
-                log(`ルーム参加エラー: ${error.message}`);
+                log(`合言葉でのルーム参加エラー: ${error.message}`);
             });
         }
         

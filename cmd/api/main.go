@@ -98,13 +98,12 @@ func main() {
 	gameRouter.Use(auth.AuthMiddleware)
 	gameRouter.Use(auth.CORSHandler())
 
-	// ルーム作成・参加・状態取得
-	gameRouter.HandleFunc("/room", gameHandler.CreateRoom).Methods("POST", "OPTIONS")
-	gameRouter.HandleFunc("/room/{roomID}/join", gameHandler.JoinRoom).Methods("POST", "OPTIONS")
-	gameRouter.HandleFunc("/room/{roomID}/status", gameHandler.GetRoomStatus).Methods("GET", "OPTIONS")
+	// 合言葉ベースのマッチング・状態取得
+	gameRouter.HandleFunc("/room/passcode/{passcode}/join", gameHandler.JoinRoomByPasscode).Methods("POST", "OPTIONS")
+	gameRouter.HandleFunc("/room/passcode/{passcode}/status", gameHandler.GetRoomStatus).Methods("GET", "OPTIONS")
 
-	// WebSocket接続（ここはバイパスのままでOK）
-	r.HandleFunc("/api/game/ws/{roomID}", gameHandler.HandleWebSocketConnection)
+	// WebSocket接続（合言葉ベース）
+	r.HandleFunc("/api/game/ws/{passcode}", gameHandler.HandleWebSocketConnection)
 
 	// ポート番号の設定
 	port := os.Getenv("PORT")

@@ -190,25 +190,46 @@ func (s *PlayerGameState) buildContributionScoresFromDeck() {
 
 // generatePieceQueue はテトリスで一般的な7-bagシステムに基づきピースキューを生成します。
 // キューが一定数以下になったら新しい7種類のテトリミノをランダムな順序で追加します。
+// 連続した同じテトリミノの出現を防ぐため、前のバッグの最後のピースと新しいバッグの最初のピースが
+// 同じにならないようにシャッフルを調整します。
 func (s *PlayerGameState) generatePieceQueue() {
 	bag := []tetris.PieceType{tetris.TypeI, tetris.TypeO, tetris.TypeT, tetris.TypeS, tetris.TypeZ, tetris.TypeJ, tetris.TypeL}
+	
+	// 現在のキューの最後のピースを取得（連続防止のため）
+	var lastPieceType tetris.PieceType
+	var hasLastPiece bool
+	if len(s.pieceQueue) > 0 {
+		lastPieceType = s.pieceQueue[len(s.pieceQueue)-1]
+		hasLastPiece = true
+	}
+	
+	// バッグをシャッフル
 	s.randGenerator.Shuffle(len(bag), func(i, j int) {
 		bag[i], bag[j] = bag[j], bag[i]
 	})
+	
+	// 連続防止：前のバッグの最後のピースと新しいバッグの最初のピースが同じ場合、調整する
+	if hasLastPiece && len(bag) > 1 && bag[0] == lastPieceType {
+		// 最初のピースと2番目以降のどれかを交換
+		// ランダムな位置（1から最後まで）を選んで交換
+		swapIndex := s.randGenerator.Intn(len(bag)-1) + 1
+		bag[0], bag[swapIndex] = bag[swapIndex], bag[0]
+		
+		log.Printf("[PieceQueue] 連続防止: 前のピース %d と重複していたため、位置 %d と交換しました", lastPieceType, swapIndex)
+	}
+	
 	s.pieceQueue = append(s.pieceQueue, bag...)
+	// ログ出力を削減（パフォーマンス改善） - 重要なイベントのみ残す
+	// log.Printf("[PieceQueue] 新しいバッグを生成: %v (キュー長: %d)", bag, len(s.pieceQueue))
 }
 
 // GetNextPieceFromQueue はキューから次のピースを取得し、必要であれば新しいバッグを生成します。
+// 7-bagシステムを最優先し、デッキデータからはスコア情報のみを使用します。
 //
 // Returns:
 //   *Piece: キューから取り出された次のテトリミノのポインタ
 func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
-	// デッキデータからピースを取得を試みる
-	if deckPiece := s.getNextPieceFromDeck(); deckPiece != nil {
-		return deckPiece
-	}
-
-	// デッキデータがない場合は従来の7-bagシステムを使用
+	// 7-bagシステムを使用してピースタイプを決定
 	// キューの長さが短い場合、新しいバッグを追加
 	if len(s.pieceQueue) < 7 { // 例えば、残り7個以下になったら補充
 		s.generatePieceQueue()
@@ -216,15 +237,82 @@ func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
 
 	pieceType := s.pieceQueue[0]
 	s.pieceQueue = s.pieceQueue[1:] // キューから削除
+	
+	// ログ出力を削減（パフォーマンス改善）
+	// log.Printf("[PieceQueue] キューから取得: %d (残り: %d個)", pieceType, len(s.pieceQueue))
 
+	// デッキデータからスコア情報を取得（ピースタイプは7-bagで決定済み）
+	if deckPiece := s.getPieceScoreFromDeck(pieceType); deckPiece != nil {
+		return deckPiece
+	}
+
+	// デッキデータがない場合はデフォルトのピースを作成
 	return &tetris.Piece{
 		Type: pieceType,
 		ScoreData: make(map[string]int), // 空のスコアデータで初期化
 	}
 }
 
-// getNextPieceFromDeck はデッキデータから次のピースを取得します。
+// getPieceScoreFromDeck は指定されたピースタイプのデッキデータからスコア情報を取得します。
+// 7-bagシステムで決定されたピースタイプに対応するデッキデータを探し、スコア情報を設定します。
+//
+// Parameters:
+//   pieceType : 7-bagシステムで決定されたピースタイプ
+// Returns:
+//   *tetris.Piece: スコア情報が設定されたピース（デッキデータがない場合はnil）
+func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tetris.Piece {
+	if len(s.DeckPlacements) == 0 {
+		return nil // デッキデータがない
+	}
+
+	// 指定されたピースタイプのデッキデータを探す
+	var selectedDeckPiece *DeckPlacementPiece
+	for _, deckPiece := range s.DeckPlacements {
+		if deckPiece.Type == pieceType {
+			selectedDeckPiece = &deckPiece
+			break
+		}
+	}
+
+	// 指定されたピースタイプのデッキデータが見つからない場合
+	if selectedDeckPiece == nil {
+		log.Printf("[PieceQueue] デッキデータに %d タイプのピースが見つかりません、デフォルトスコアを使用", pieceType)
+		return nil
+	}
+
+	// テトリスピースを作成
+	piece := &tetris.Piece{
+		Type:     pieceType, // 7-bagで決定されたピースタイプを使用
+		ScoreData: make(map[string]int),
+	}
+
+	// すべての回転状態（0, 90, 180, 270度）に対してスコアマッピングを作成
+	for rotation := 0; rotation <= 270; rotation += 90 {
+		blocks := piece.GetBlocksAtRotation(rotation)
+		
+		for i, block := range blocks {
+			// 回転状態別のキーを作成 "rot_rotation_x_y"
+			key := fmt.Sprintf("rot_%d_%d_%d", rotation, block[0], block[1])
+			
+			// デッキデータの対応するブロックからスコアを取得
+			var score int
+			if i < len(selectedDeckPiece.Blocks) {
+				score = selectedDeckPiece.Blocks[i].Score
+			} else {
+				score = 100 // デフォルトスコア
+			}
+			piece.ScoreData[key] = score
+		}
+	}
+
+	// ログ出力を削減（パフォーマンス改善）
+	// log.Printf("[PieceQueue] デッキから %d タイプのピースにスコア情報を設定しました", pieceType)
+	return piece
+}
+
+// getNextPieceFromDeck はデッキデータから次のピースを取得します。（廃止予定）
 // デッキデータがある場合は、そこからランダムに選択します。
+// 注意: この関数は7-bagシステムを無視するため、現在は使用していません。
 //
 // Returns:
 //   *tetris.Piece: デッキから選択されたピース（デッキデータがない場合はnil）
@@ -259,8 +347,9 @@ func (s *PlayerGameState) getNextPieceFromDeck() *tetris.Piece {
 			}
 			piece.ScoreData[key] = score
 			
-			log.Printf("[DEBUG] Rotation %d, Block %d at position (%d,%d) -> key %s, score %d", 
-				rotation, i, block[0], block[1], key, score)
+			// ログ出力を削減（パフォーマンス改善）
+			// log.Printf("[DEBUG] Rotation %d, Block %d at position (%d,%d) -> key %s, score %d", 
+			// 	rotation, i, block[0], block[1], key, score)
 		}
 	}
 
@@ -436,11 +525,23 @@ func (gs *GameSession) IsTimeUp() bool {
 
 // ToLightweight はGameSessionから軽量な構造体に変換します。
 func (gs *GameSession) ToLightweight() *LightweightGameState {
+	// 残り時間を計算
+	remainingTime := 0
+	if gs.Status == "playing" && !gs.StartedAt.IsZero() {
+		elapsed := time.Since(gs.StartedAt)
+		remaining := gs.TimeLimit - elapsed
+		if remaining > 0 {
+			remainingTime = int(remaining.Seconds())
+		}
+	}
+
 	lightweight := &LightweightGameState{
-		ID:     gs.ID,
-		Status: gs.Status,
-		StartedAt: gs.StartedAt,
-		EndedAt:   gs.EndedAt,
+		ID:            gs.ID,
+		Status:        gs.Status,
+		StartedAt:     gs.StartedAt,
+		EndedAt:       gs.EndedAt,
+		TimeLimit:     int(gs.TimeLimit.Seconds()),
+		RemainingTime: remainingTime,
 	}
 	
 	if gs.Player1 != nil {
@@ -481,21 +582,20 @@ func (gs *GameSession) ToLightweight() *LightweightGameState {
 // updateCurrentPieceScores は現在のピースのスコア情報をCurrentPieceScoresマップに更新します。
 // これによりクライアント側で落下中のピースも正しい色で表示されます。
 func (s *PlayerGameState) updateCurrentPieceScores() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// CurrentPieceScoresマップをクリア
-	for k := range s.CurrentPieceScores {
-		delete(s.CurrentPieceScores, k)
-	}
-
-	// 現在のピースが存在しない場合は何もしない
+	// 現在のピースが存在しない場合は何もしない（早期リターン）
 	if s.CurrentPiece == nil {
 		return
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// マップ全削除の代わりに、新しいマップを作成（高速化）
+	newScores := make(map[string]int, 4) // テトリミノは最大4ブロック
+
 	// 現在のピースの各ブロックについて、ボード座標でのスコア情報を設定
-	for _, block := range s.CurrentPiece.Blocks() {
+	blocks := s.CurrentPiece.Blocks() // 一度だけ取得
+	for _, block := range blocks {
 		boardX := s.CurrentPiece.X + block[0]
 		boardY := s.CurrentPiece.Y + block[1]
 
@@ -503,30 +603,31 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
 			scoreKey := fmt.Sprintf("%d_%d", boardY, boardX)
 			
-			// スコア取得ロジック（デッドロック回避のため直接実装）
+			// スコア取得ロジック（効率化）
 			score := 100 // デフォルトスコア
 			
-			// ピース内の相対位置を計算
-			relativeX := boardX - s.CurrentPiece.X
-			relativeY := boardY - s.CurrentPiece.Y
-			
-			// 現在の回転状態での位置キーを作成
-			rotationKey := fmt.Sprintf("rot_%d_%d_%d", s.CurrentPiece.Rotation, relativeX, relativeY)
-			
 			if s.CurrentPiece.ScoreData != nil {
+				// ピース内の相対位置を計算
+				relativeX := block[0] // 直接blockから取得（効率化）
+				relativeY := block[1]
+				
+				// 現在の回転状態での位置キーを作成
+				rotationKey := fmt.Sprintf("rot_%d_%d_%d", s.CurrentPiece.Rotation, relativeX, relativeY)
+				
 				// ピースのスコアデータから取得を試みる
 				if pieceScore, exists := s.CurrentPiece.ScoreData[rotationKey]; exists && pieceScore > 0 {
 					score = pieceScore
 				} else if contributionScore, exists := s.ContributionScores[scoreKey]; exists {
-					// フォールバック: ContributionScoresから取得（既にロック済み）
 					score = contributionScore
 				}
 			} else if contributionScore, exists := s.ContributionScores[scoreKey]; exists {
-				// フォールバック: ContributionScoresから取得（既にロック済み）
 				score = contributionScore
 			}
 			
-			s.CurrentPieceScores[scoreKey] = score
+			newScores[scoreKey] = score
 		}
 	}
+	
+	// 一括置換（アトミック操作）
+	s.CurrentPieceScores = newScores
 }

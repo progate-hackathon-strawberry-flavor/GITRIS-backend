@@ -107,23 +107,26 @@ func (b *Board) ClearLines(contributionScores map[string]int) (int, int) {
 
 	// ボードの最下部から上に向かって各行をチェック
 	for y := BoardHeight - 1; y >= 0; y-- {
+		// 最初にライン満了をチェック（軽量化）
 		isLineFull := true
-		lineScore := 0
 		for x := 0; x < BoardWidth; x++ {
 			if b[y][x] == BlockEmpty {
 				isLineFull = false // 一つでも空のマスがあればラインは揃っていない
 				break
 			}
-			// 各ブロックのContributionスコアを加算
-			// GitHub草のグリッドは8x7だが、テトリスボードは10x20
-			// ここではボード上の(y,x)に対応するcontributionScoresを仮定して加算
-			// 実際のシステムでは、ゲーム開始時に読み込んだデッキのテトリミノ配置と
-			// その下のGitHub草のContributionデータから、各ブロックのスコアを決定する必要がある
-			scoreKey := fmt.Sprintf("%d_%d", y, x) // y_x の形式でスコアを検索
-			if score, ok := contributionScores[scoreKey]; ok {
-				lineScore += score
-			} else {
-				lineScore += 10 // マップにない場合は仮のスコア
+		}
+		
+		// 満了している場合のみスコア計算（効率化）
+		lineScore := 0
+		if isLineFull {
+			for x := 0; x < BoardWidth; x++ {
+				// スコア計算の最適化（文字列生成軽量化）
+				scoreKey := fmt.Sprintf("%d_%d", y, x) // y_x の形式でスコアを検索
+				if score, ok := contributionScores[scoreKey]; ok {
+					lineScore += score
+				} else {
+					lineScore += 10 // マップにない場合は仮のスコア
+				}
 			}
 		}
 
