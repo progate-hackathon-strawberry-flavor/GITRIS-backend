@@ -101,9 +101,14 @@ func TestAutoFall(t *testing.T) {
 		}
 	}
 
-	// ピースがボードの底に着地するまで落下させる
-	for !state.IsGameOver && state.CurrentPiece != nil && !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
-		AutoFall(state)
+	// ピースがボードの底に着地するまで落下させる（無限ループ防止）
+	maxFalls := 100 // 安全のため最大落下回数を制限
+	fallCount := 0
+	for !state.IsGameOver && state.CurrentPiece != nil && !state.Board.HasCollision(state.CurrentPiece, 0, 1) && fallCount < maxFalls {
+		if !AutoFall(state) {
+			break // AutoFallがfalseを返したら（着地したら）ループを抜ける
+		}
+		fallCount++
 	}
 
 	// ピースが着地後、ボードにマージされ、新しいピースが生成されたことを確認
@@ -232,7 +237,7 @@ func TestLineClear(t *testing.T) {
 
 	// ボードの最下段を埋める
 	for x := 0; x < tetris.BoardWidth; x++ {
-		state.Board[tetris.BoardHeight-1][x] = tetris.BlockFilled
+		state.Board[tetris.BoardHeight-1][x] = tetris.BlockI
 	}
 
 	initialScore := state.Score
@@ -259,10 +264,10 @@ func TestGameOver(t *testing.T) {
 		t.Fatal("Initial CurrentPiece is nil, cannot run test.")
 	}
 
-	// ボードをほぼ埋める（最上段以外）
-	for y := 1; y < tetris.BoardHeight; y++ {
+	// ボードを全体的に埋める（最上部まで含む）
+	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
-			state.Board[y][x] = tetris.BlockFilled
+			state.Board[y][x] = tetris.BlockI
 		}
 	}
 
@@ -309,29 +314,44 @@ func TestApplyPlayerInput_Hold(t *testing.T) {
 		t.Errorf("Expected current piece to be of type %v, but got %v", initialNextPieceType, state.CurrentPiece.Type)
 	}
 
-	// 2回目のホールドをテスト（ピースの入れ替え）
-	secondPieceType := state.CurrentPiece.Type
+	// 2回目のホールドをテスト（同じピースでは実行されない）
 	moved = ApplyPlayerInput(state, "hold")
 
-	// 2回目のホールドが実行されたことを確認
-	if !moved {
-		t.Error("Expected second hold to be executed, but it was not.")
+	// 2回目のホールドが実行されなかったことを確認（テトリスルール）
+	if moved {
+		t.Error("Expected second hold to be blocked (same piece), but it was executed.")
 	}
 
-	// ホールドされたピースが入れ替わったことを確認
-	if state.HeldPiece.Type != secondPieceType {
-		t.Errorf("Expected held piece to be of type %v, but got %v", secondPieceType, state.HeldPiece.Type)
+	// ホールドされたピースとCurrentPieceが変わっていないことを確認
+	if state.HeldPiece.Type != initialPieceType {
+		t.Errorf("Expected held piece to remain type %v, but got %v", initialPieceType, state.HeldPiece.Type)
 	}
 
-	// 現在のピースが元のホールドピースに戻ったことを確認
-	if state.CurrentPiece.Type != initialPieceType {
-		t.Errorf("Expected current piece to be of type %v, but got %v", initialPieceType, state.CurrentPiece.Type)
+	if state.CurrentPiece.Type != initialNextPieceType {
+		t.Errorf("Expected current piece to remain type %v, but got %v", initialNextPieceType, state.CurrentPiece.Type)
 	}
 
 	// ピースの位置が正しくリセットされていることを確認
-	if state.CurrentPiece.X != tetris.BoardWidth/2-2 || state.CurrentPiece.Y != 0 {
-		t.Errorf("Expected piece to be at position (%d, 0), but got (%d, %d)",
-			tetris.BoardWidth/2-2, state.CurrentPiece.X, state.CurrentPiece.Y)
+	// テトリミノタイプに応じた期待値を設定
+	var expectedX, expectedY int
+	switch state.CurrentPiece.Type {
+	case tetris.TypeI:
+		expectedX = tetris.BoardWidth/2 - 2 // 3
+		expectedY = 1
+	case tetris.TypeO:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	case tetris.TypeL:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	default:
+		expectedX = tetris.BoardWidth/2 - 1 // 4
+		expectedY = 1
+	}
+	
+	if state.CurrentPiece.X != expectedX || state.CurrentPiece.Y != expectedY {
+		t.Errorf("Expected piece to be at position (%d, %d), but got (%d, %d)",
+			expectedX, expectedY, state.CurrentPiece.X, state.CurrentPiece.Y)
 	}
 }
 
@@ -343,8 +363,8 @@ func TestApplyPlayerInput_HoldGameOver(t *testing.T) {
 		t.Fatal("Initial CurrentPiece is nil, cannot run test.")
 	}
 
-	// ボードをほぼ埋める（最上段以外）
-	for y := 1; y < tetris.BoardHeight; y++ {
+	// ボードを全体的に埋める（最上部まで含む）
+	for y := 0; y < tetris.BoardHeight; y++ {
 		for x := 0; x < tetris.BoardWidth; x++ {
 			state.Board[y][x] = tetris.BlockFilled
 		}
@@ -363,3 +383,193 @@ func TestApplyPlayerInput_HoldGameOver(t *testing.T) {
 }
 
 // `go test -v ./services/tetris/...` コマンドでテストを実行できます。
+
+// TestUpdateContributionScoresFromPiece はupdateContributionScoresFromPiece関数をテストします。
+func TestUpdateContributionScoresFromPiece(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// テスト用のピースを作成（ScoreDataを含む）
+	// T-ピースの0度回転時の配置: {{1, 0}, {0, 1}, {1, 1}, {2, 1}}
+	// X=5, Y=10に配置した場合の実際のボード座標:
+	// (5+1, 10+0) = (6, 10)
+	// (5+0, 10+1) = (5, 11)  
+	// (5+1, 10+1) = (6, 11)
+	// (5+2, 10+1) = (7, 11)
+	testPiece := &tetris.Piece{
+		Type:     tetris.TypeT,
+		X:        5,
+		Y:        10,
+		Rotation: 0,
+		ScoreData: map[string]int{
+			"rot_0_1_0": 100, // ブロック座標 (6, 10)
+			"rot_0_0_1": 200, // ブロック座標 (5, 11)
+			"rot_0_1_1": 300, // ブロック座標 (6, 11)
+			"rot_0_2_1": 400, // ブロック座標 (7, 11)
+		},
+	}
+
+	// 初期状態では該当位置にスコアがないことを確認
+	scoreKey1 := "10_6" // Y=10, X=6
+	scoreKey2 := "11_5" // Y=11, X=5
+	scoreKey3 := "11_6" // Y=11, X=6
+	scoreKey4 := "11_7" // Y=11, X=7
+
+	// スコア更新前の値を記録
+	initialScore1 := state.ContributionScores[scoreKey1]
+	initialScore2 := state.ContributionScores[scoreKey2]
+	initialScore3 := state.ContributionScores[scoreKey3]
+	initialScore4 := state.ContributionScores[scoreKey4]
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが正しく更新されたことを確認
+	if state.ContributionScores[scoreKey1] != 100 {
+		t.Errorf("Expected score at %s to be 100, but got %d", scoreKey1, state.ContributionScores[scoreKey1])
+	}
+	if state.ContributionScores[scoreKey2] != 200 {
+		t.Errorf("Expected score at %s to be 200, but got %d", scoreKey2, state.ContributionScores[scoreKey2])
+	}
+	if state.ContributionScores[scoreKey3] != 300 {
+		t.Errorf("Expected score at %s to be 300, but got %d", scoreKey3, state.ContributionScores[scoreKey3])
+	}
+	if state.ContributionScores[scoreKey4] != 400 {
+		t.Errorf("Expected score at %s to be 400, but got %d", scoreKey4, state.ContributionScores[scoreKey4])
+	}
+
+	t.Logf("Score update test passed. Initial scores: [%d, %d, %d, %d] -> Final scores: [%d, %d, %d, %d]",
+		initialScore1, initialScore2, initialScore3, initialScore4,
+		state.ContributionScores[scoreKey1], state.ContributionScores[scoreKey2],
+		state.ContributionScores[scoreKey3], state.ContributionScores[scoreKey4])
+}
+
+// TestUpdateContributionScoresFromPiece_NilPiece はnil参照のケースをテストします。
+func TestUpdateContributionScoresFromPiece_NilPiece(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// nilピースでの呼び出し（パニックが発生しないことを確認）
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("updateContributionScoresFromPiece panicked with nil piece: %v", r)
+		}
+	}()
+
+	updateContributionScoresFromPiece(state, nil)
+	// パニックが発生しなければテスト成功
+}
+
+// TestUpdateContributionScoresFromPiece_EmptyScoreData は空のScoreDataのケースをテストします。
+func TestUpdateContributionScoresFromPiece_EmptyScoreData(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// 空のScoreDataを持つピース
+	testPiece := &tetris.Piece{
+		Type:      tetris.TypeI,
+		X:         3,
+		Y:         5,
+		Rotation:  0,
+		ScoreData: map[string]int{},
+	}
+
+	// 初期状態のスコアを記録
+	initialScores := make(map[string]int)
+	for key, value := range state.ContributionScores {
+		initialScores[key] = value
+	}
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが変更されていないことを確認
+	for key, initialValue := range initialScores {
+		if state.ContributionScores[key] != initialValue {
+			t.Errorf("Expected score at %s to remain %d, but got %d", key, initialValue, state.ContributionScores[key])
+		}
+	}
+}
+
+// TestUpdateContributionScoresFromPiece_OutOfBounds は範囲外座標のケースをテストします。
+func TestUpdateContributionScoresFromPiece_OutOfBounds(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+
+	// ボード範囲外に配置されたピース
+	testPiece := &tetris.Piece{
+		Type:     tetris.TypeT,
+		X:        -5, // 範囲外のX座標
+		Y:        -5, // 範囲外のY座標
+		Rotation: 0,
+		ScoreData: map[string]int{
+			"rot_0_0_0": 500,
+			"rot_0_1_0": 600,
+			"rot_0_0_1": 700,
+			"rot_0_1_1": 800,
+		},
+	}
+
+	// 初期状態のスコアを記録
+	initialScores := make(map[string]int)
+	for key, value := range state.ContributionScores {
+		initialScores[key] = value
+	}
+
+	// updateContributionScoresFromPiece を呼び出し
+	updateContributionScoresFromPiece(state, testPiece)
+
+	// スコアが変更されていないことを確認（範囲外なので影響なし）
+	for key, initialValue := range initialScores {
+		if state.ContributionScores[key] != initialValue {
+			t.Errorf("Expected score at %s to remain %d with out-of-bounds piece, but got %d", key, initialValue, state.ContributionScores[key])
+		}
+	}
+}
+
+// TestApplyPlayerInput_GameOverIgnored はゲームオーバーしたプレイヤーの操作が無視されることをテストします。
+func TestApplyPlayerInput_GameOverIgnored(t *testing.T) {
+	mockDeck := &models.Deck{ID: "mock-deck-id"}
+	state := NewPlayerGameState("test-user", mockDeck)
+	
+	// プレイヤーをゲームオーバー状態にする
+	state.IsGameOver = true
+	
+	// 初期状態を記録
+	initialX := state.CurrentPiece.X
+	initialY := state.CurrentPiece.Y
+	initialRotation := state.CurrentPiece.Rotation
+	initialScore := state.Score
+	
+	// 各種操作を試行
+	actions := []string{"move_left", "move_right", "rotate", "soft_drop", "hard_drop", "hold"}
+	
+	for _, action := range actions {
+		// 操作を実行
+		moved := ApplyPlayerInput(state, action)
+		
+		// ゲームオーバー状態では操作が無視されることを確認
+		if moved {
+			t.Errorf("Expected action '%s' to be ignored for game over player, but it was processed", action)
+		}
+		
+		// 状態が変更されていないことを確認
+		if state.CurrentPiece.X != initialX {
+			t.Errorf("Expected piece X to remain %d after action '%s', but got %d", initialX, action, state.CurrentPiece.X)
+		}
+		if state.CurrentPiece.Y != initialY {
+			t.Errorf("Expected piece Y to remain %d after action '%s', but got %d", initialY, action, state.CurrentPiece.Y)
+		}
+		if state.CurrentPiece.Rotation != initialRotation {
+			t.Errorf("Expected piece rotation to remain %d after action '%s', but got %d", initialRotation, action, state.CurrentPiece.Rotation)
+		}
+		if state.Score != initialScore {
+			t.Errorf("Expected score to remain %d after action '%s', but got %d", initialScore, action, state.Score)
+		}
+	}
+	
+	// ゲームオーバー状態が維持されていることを確認
+	if !state.IsGameOver {
+		t.Error("Expected player to remain in game over state")
+	}
+}

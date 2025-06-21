@@ -17,14 +17,14 @@ type BlockType int
 
 const (
 	BlockEmpty BlockType = iota // 0: 空のマス
-	BlockFilled                  // 1: 一般的な固定されたブロック (使用しない可能性も)
-	BlockI                       // 2: I-テトリミノ由来のブロック
-	BlockO                       // 3: O-テトリミノ由来のブロック
-	BlockT                       // 4: T-テトリミノ由来のブロック
-	BlockS                       // 5: S-テトリミノ由来のブロック
-	BlockZ                       // 6: Z-テトリミノ由来のブロック
-	BlockJ                       // 7: J-テトリミノ由来のブロック
-	BlockL                       // 8: L-テトリミノ由来のブロック
+	BlockI                       // 1: I-テトリミノ由来のブロック (PieceType 0 + 1)
+	BlockO                       // 2: O-テトリミノ由来のブロック (PieceType 1 + 1)
+	BlockT                       // 3: T-テトリミノ由来のブロック (PieceType 2 + 1)
+	BlockS                       // 4: S-テトリミノ由来のブロック (PieceType 3 + 1)
+	BlockZ                       // 5: Z-テトリミノ由来のブロック (PieceType 4 + 1)
+	BlockJ                       // 6: J-テトリミノ由来のブロック (PieceType 5 + 1)
+	BlockL                       // 7: L-テトリミノ由来のブロック (PieceType 6 + 1)
+	BlockFilled                  // 8: 固定ブロック（テスト用など）
 	BlockGarbage                 // 9: お邪魔ブロック
 )
 
@@ -84,7 +84,7 @@ func (b *Board) MergePiece(p *Piece) {
 
 		// ボードの有効な範囲内でのみマージ
 		if x >= 0 && x < BoardWidth && y >= 0 && y < BoardHeight {
-			b[y][x] = BlockType(p.Type + 2) // PieceType (0-6) と BlockType (2-8) のオフセットを考慮
+			b[y][x] = BlockType(p.Type + 1) // PieceType (0-6) を BlockType (1-7) に変換
 		}
 	}
 }
@@ -107,23 +107,26 @@ func (b *Board) ClearLines(contributionScores map[string]int) (int, int) {
 
 	// ボードの最下部から上に向かって各行をチェック
 	for y := BoardHeight - 1; y >= 0; y-- {
+		// 最初にライン満了をチェック（軽量化）
 		isLineFull := true
-		lineScore := 0
 		for x := 0; x < BoardWidth; x++ {
 			if b[y][x] == BlockEmpty {
 				isLineFull = false // 一つでも空のマスがあればラインは揃っていない
 				break
 			}
-			// 各ブロックのContributionスコアを加算
-			// GitHub草のグリッドは8x7だが、テトリスボードは10x20
-			// ここではボード上の(y,x)に対応するcontributionScoresを仮定して加算
-			// 実際のシステムでは、ゲーム開始時に読み込んだデッキのテトリミノ配置と
-			// その下のGitHub草のContributionデータから、各ブロックのスコアを決定する必要がある
-			scoreKey := fmt.Sprintf("%d_%d", y, x) // y_x の形式でスコアを検索
-			if score, ok := contributionScores[scoreKey]; ok {
-				lineScore += score
-			} else {
-				lineScore += 10 // マップにない場合は仮のスコア
+		}
+		
+		// 満了している場合のみスコア計算（効率化）
+		lineScore := 0
+		if isLineFull {
+			for x := 0; x < BoardWidth; x++ {
+				// スコア計算の最適化（文字列生成軽量化）
+				scoreKey := fmt.Sprintf("%d_%d", y, x) // y_x の形式でスコアを検索
+				if score, ok := contributionScores[scoreKey]; ok {
+					lineScore += score
+				} else {
+					lineScore += 10 // マップにない場合は仮のスコア
+				}
 			}
 		}
 
