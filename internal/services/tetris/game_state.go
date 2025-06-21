@@ -290,11 +290,12 @@ func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tet
 
 	// すべての回転状態（0, 90, 180, 270度）に対してスコアマッピングを作成
 	for rotation := 0; rotation < 4; rotation++ {
-		blocks := piece.GetBlocksAtRotation(rotation)
+		rotationDegrees := rotation * 90 // 0, 90, 180, 270
+		blocks := piece.GetBlocksAtRotation(rotationDegrees)
 		
 		for i, block := range blocks {
 			// 回転状態別のキーを作成 "rot_rotation_x_y"
-			key := "rot_" + strconv.Itoa(rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
+			key := "rot_" + strconv.Itoa(rotationDegrees) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
 			// デッキデータの対応するブロックからスコアを取得
 			var score int
@@ -334,11 +335,12 @@ func (s *PlayerGameState) getNextPieceFromDeck() *tetris.Piece {
 
 	// すべての回転状態（0, 90, 180, 270度）に対してスコアマッピングを作成
 	for rotation := 0; rotation < 4; rotation++ {
-		blocks := piece.GetBlocksAtRotation(rotation)
+		rotationDegrees := rotation * 90 // 0, 90, 180, 270
+		blocks := piece.GetBlocksAtRotation(rotationDegrees)
 		
 		for i, block := range blocks {
 			// 回転状態別のキーを作成 "rot_rotation_x_y"
-			key := "rot_" + strconv.Itoa(rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
+			key := "rot_" + strconv.Itoa(rotationDegrees) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
 			// デッキデータの対応するブロックからスコアを取得
 			var score int
@@ -351,7 +353,7 @@ func (s *PlayerGameState) getNextPieceFromDeck() *tetris.Piece {
 			
 			// ログ出力を削減（パフォーマンス改善）
 			// log.Printf("[DEBUG] Rotation %d, Block %d at position (%d,%d) -> key %s, score %d", 
-			// 	rotation, i, block[0], block[1], key, score)
+			// 	rotationDegrees, i, block[0], block[1], key, score)
 		}
 	}
 

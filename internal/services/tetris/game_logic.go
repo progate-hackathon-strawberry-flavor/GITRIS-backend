@@ -76,6 +76,7 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 		// ソフトドロップ（手動でピースを下に落とす）
 		if !state.Board.HasCollision(state.CurrentPiece, 0, 1) {
 			state.CurrentPiece.Y++
+			state.Score += 1 // ソフトドロップで1ポイント加算
 			moved = true
 		}
 	case "hard_drop":
@@ -86,30 +87,41 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 		}
 		if dropDistance > 0 {
 			state.CurrentPiece.Y += dropDistance
+			state.Score += dropDistance * 2 // ハードドロップで落下距離×2ポイント加算
 			moved = true
 		}
 		// ハードドロップ後はピースを即座に固定
 		state.Board.MergePiece(state.CurrentPiece)
 		handlePieceLock(state)
 	case "rotate_right", "rotate":
-		// 右回転
-		oldRotation := state.CurrentPiece.Rotation
-		state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 1) % 4
-		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-			// 衝突する場合は回転を元に戻す
-			state.CurrentPiece.Rotation = oldRotation
+		// 右回転（Oピースは回転しない）
+		if state.CurrentPiece.Type == tetris.TypeO {
+			// Oピースは回転しない
+			moved = false
 		} else {
-			moved = true
+			oldRotation := state.CurrentPiece.Rotation
+			state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 90) % 360
+			if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+				// 衝突する場合は回転を元に戻す
+				state.CurrentPiece.Rotation = oldRotation
+			} else {
+				moved = true
+			}
 		}
 	case "rotate_left":
-		// 左回転
-		oldRotation := state.CurrentPiece.Rotation
-		state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 3) % 4 // +3 is equivalent to -1 in mod 4
-		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-			// 衝突する場合は回転を元に戻す
-			state.CurrentPiece.Rotation = oldRotation
+		// 左回転（Oピースは回転しない）
+		if state.CurrentPiece.Type == tetris.TypeO {
+			// Oピースは回転しない
+			moved = false
 		} else {
-			moved = true
+			oldRotation := state.CurrentPiece.Rotation
+			state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation - 90 + 360) % 360 // 負の値を回避
+			if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+				// 衝突する場合は回転を元に戻す
+				state.CurrentPiece.Rotation = oldRotation
+			} else {
+				moved = true
+			}
 		}
 	case "hold":
 		// ホールド機能（今回が既に使用済みでなければ実行）

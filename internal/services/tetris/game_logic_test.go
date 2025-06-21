@@ -314,23 +314,21 @@ func TestApplyPlayerInput_Hold(t *testing.T) {
 		t.Errorf("Expected current piece to be of type %v, but got %v", initialNextPieceType, state.CurrentPiece.Type)
 	}
 
-	// 2回目のホールドをテスト（ピースの入れ替え）
-	secondPieceType := state.CurrentPiece.Type
+	// 2回目のホールドをテスト（同じピースでは実行されない）
 	moved = ApplyPlayerInput(state, "hold")
 
-	// 2回目のホールドが実行されたことを確認
-	if !moved {
-		t.Error("Expected second hold to be executed, but it was not.")
+	// 2回目のホールドが実行されなかったことを確認（テトリスルール）
+	if moved {
+		t.Error("Expected second hold to be blocked (same piece), but it was executed.")
 	}
 
-	// ホールドされたピースが入れ替わったことを確認
-	if state.HeldPiece.Type != secondPieceType {
-		t.Errorf("Expected held piece to be of type %v, but got %v", secondPieceType, state.HeldPiece.Type)
+	// ホールドされたピースとCurrentPieceが変わっていないことを確認
+	if state.HeldPiece.Type != initialPieceType {
+		t.Errorf("Expected held piece to remain type %v, but got %v", initialPieceType, state.HeldPiece.Type)
 	}
 
-	// 現在のピースが元のホールドピースに戻ったことを確認
-	if state.CurrentPiece.Type != initialPieceType {
-		t.Errorf("Expected current piece to be of type %v, but got %v", initialPieceType, state.CurrentPiece.Type)
+	if state.CurrentPiece.Type != initialNextPieceType {
+		t.Errorf("Expected current piece to remain type %v, but got %v", initialNextPieceType, state.CurrentPiece.Type)
 	}
 
 	// ピースの位置が正しくリセットされていることを確認
