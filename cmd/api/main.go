@@ -49,6 +49,9 @@ func main() {
 
 	// テトリスゲームのセッションマネージャーを初期化
 	sessionManager := tetris.NewSessionManager(databaseService)
+	
+	// SessionManagerのメインループをゴルーチンで開始
+	go sessionManager.Run()
 
 	// ハンドラ層の初期化
 	contributionHandler := api.NewContributionHandler(githubService, databaseService)
@@ -90,17 +93,15 @@ func main() {
 	// テトリスゲーム関連のルート
 	// 認証が必要なゲームルート
 	gameRouter := r.PathPrefix("/api/game").Subrouter()
-	gameRouter.Use(auth.AuthMiddleware) // 認証を有効化
-	gameRouter.Use(auth.CORSHandler()) // CORSミドルウェアを追加
-	
-	// ルーム参加
+	gameRouter.Use(auth.AuthMiddleware)
+	gameRouter.Use(auth.CORSHandler())
+
+	// ルーム作成・参加・状態取得
+	gameRouter.HandleFunc("/room", gameHandler.CreateRoom).Methods("POST", "OPTIONS")
 	gameRouter.HandleFunc("/room/{roomID}/join", gameHandler.JoinRoom).Methods("POST", "OPTIONS")
 	gameRouter.HandleFunc("/room/{roomID}/status", gameHandler.GetRoomStatus).Methods("GET", "OPTIONS")
-	
-	// ルーム作成（認証ミドルウェアをバイパス）
-	r.HandleFunc("/api/game/room", gameHandler.CreateRoom).Methods("POST", "OPTIONS")
-	
-	// WebSocket接続（認証ミドルウェアをバイパス）
+
+	// WebSocket接続（ここはバイパスのままでOK）
 	r.HandleFunc("/api/game/ws/{roomID}", gameHandler.HandleWebSocketConnection)
 
 	// ポート番号の設定

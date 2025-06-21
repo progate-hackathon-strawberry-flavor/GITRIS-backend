@@ -22,13 +22,13 @@ type PlayerGameState struct {
 	Level         int                `json:"level"`          // 現在のレベル
 	IsGameOver    bool               `json:"is_game_over"`   // ゲームオーバー状態かどうか
 	Deck          *models.Deck       `json:"deck"`           // このゲームで使用するデッキデータ
-	pieceQueue    []tetris.PieceType // 次のピースを管理するためのキュー (7-bag systemなど)
-	randGenerator *rand.Rand         // ピース生成用の乱数ジェネレータ
-	lastFallTime  time.Time          // 最後の自動落下またはハードドロップの時間
-	contributionScores map[string]int // GitHub草のContributionスコアをボード上の位置に紐付けるマップ
+	pieceQueue    []tetris.PieceType `json:"-"`              // 次のピースを管理するためのキュー (7-bag systemなど) - JSONシリアライズから除外
+	randGenerator *rand.Rand         `json:"-"`              // ピース生成用の乱数ジェネレータ - JSONシリアライズから除外
+	lastFallTime  time.Time          `json:"-"`              // 最後の自動落下またはハードドロップの時間 - JSONシリアライズから除外
+	contributionScores map[string]int `json:"-"`             // GitHub草のContributionスコアをボード上の位置に紐付けるマップ - JSONシリアライズから除外
 	// 例: "y_x": score, "0_0": 100, "0_1": 200
-	ConsecutiveClears int            // 連続ラインクリア数 (コンボボーナス用)
-	BackToBack        bool           // T-Spin, Perfect Clear 後のラインクリアでボーナス
+	ConsecutiveClears int            `json:"consecutive_clears"` // 連続ラインクリア数 (コンボボーナス用)
+	BackToBack        bool           `json:"back_to_back"`       // T-Spin, Perfect Clear 後のラインクリアでボーナス
 }
 
 // NewPlayerGameState は新しいプレイヤーのゲーム状態を初期化して返します。
@@ -109,8 +109,22 @@ func (s *PlayerGameState) SpawnNewPiece() {
 	s.NextPiece = s.GetNextPieceFromQueue()
 
 	// 初期位置設定（ボードの中央上部）
-	s.CurrentPiece.X = tetris.BoardWidth/2 - 2 // 中心に配置 (Iミノの場合は -2)
-	s.CurrentPiece.Y = 0
+	// テトリミノの種類に応じた適切な初期位置を設定
+	switch s.CurrentPiece.Type {
+	case tetris.TypeI:
+		s.CurrentPiece.X = tetris.BoardWidth/2 - 2 // I-ミノは幅4なので中心から-2
+		s.CurrentPiece.Y = -1 // I-ミノは最初のブロックがY=1にあるので、全体をY=-1からスタート
+	case tetris.TypeO:
+		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // O-ミノは幅2なので中心から-1
+		s.CurrentPiece.Y = 0 // O-ミノは最初のブロックがY=0にあるのでY=0からスタート
+	case tetris.TypeL:
+		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // L-ミノは幅3なので中心から-1
+		s.CurrentPiece.Y = 0 // L-ミノは最初のブロックがY=0にあるのでY=0からスタート
+	default:
+		s.CurrentPiece.X = tetris.BoardWidth/2 - 1 // その他のミノは幅3なので中心から-1
+		s.CurrentPiece.Y = -1 // 多くのミノは最初のブロックがY=0にあるので、全体をY=-1からスタート
+	}
+	s.CurrentPiece.Rotation = 0 // 必ず回転をリセット
 
 	// ゲームオーバー判定: 新しいピースがスポーン位置で既に衝突している場合
 	// これは通常、ボードの最上部にブロックが積み上がってしまった状態を指します。
@@ -130,10 +144,10 @@ type GameSession struct {
 	EndedAt   time.Time        `json:"ended_at"`   // ゲーム終了日時
 	TimeLimit time.Duration    `json:"time_limit"` // ゲームの制限時間
 
-	// Internal communication channels for the session manager
-	InputCh  chan PlayerInputEvent // クライアントからのプレイヤー操作入力を受け取るチャネル
-	OutputCh chan GameStateEvent   // ゲーム状態の更新をブロードキャストするためのチャネル
-	GameLoopDone chan struct{}     // ゲームループの終了を通知するチャネル
+	// Internal communication channels for the session manager (JSONシリアライズから除外)
+	InputCh  chan PlayerInputEvent `json:"-"` // クライアントからのプレイヤー操作入力を受け取るチャネル
+	OutputCh chan GameStateEvent   `json:"-"` // ゲーム状態の更新をブロードキャストするためのチャネル
+	GameLoopDone chan struct{}     `json:"-"` // ゲームループの終了を通知するチャネル
 }
 
 // PlayerInputEvent はクライアントからの操作入力を表す構造体です。

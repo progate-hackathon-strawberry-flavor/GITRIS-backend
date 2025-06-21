@@ -7,53 +7,122 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
         }
         .container {
             display: flex;
             gap: 20px;
         }
-        .game-area {
+        .game-section {
+            flex: 2;
+            display: flex;
+            gap: 20px;
+        }
+        .player-area {
             flex: 1;
             border: 2px solid #333;
             padding: 20px;
-            background: #f5f5f5;
+            background: #2a2a2a;
+            border-radius: 10px;
         }
         .controls {
             flex: 1;
             border: 2px solid #333;
             padding: 20px;
-            background: #f0f0f0;
+            background: #2a2a2a;
+            border-radius: 10px;
         }
-        .board {
+        .tetris-board {
             display: grid;
-            grid-template-columns: repeat(10, 20px);
-            grid-template-rows: repeat(20, 20px);
+            grid-template-columns: repeat(10, 25px);
+            grid-template-rows: repeat(20, 25px);
             gap: 1px;
-            background: #333;
-            padding: 10px;
-            margin: 10px 0;
+            background: #000;
+            padding: 5px;
+            margin: 10px auto;
+            border: 3px solid #444;
+            border-radius: 5px;
+            max-width: fit-content;
         }
         .cell {
-            width: 20px;
-            height: 20px;
-            background: #fff;
-            border: 1px solid #ccc;
+            width: 25px;
+            height: 25px;
+            background: #111;
+            border: 1px solid #333;
         }
-        .cell.filled {
-            background: #007bff;
-        }
+        
+        /* テトリミノの色 */
+        .cell.type-0 { background: #4ecdc4; } /* I - シアン */
+        .cell.type-1 { background: #feca57; } /* O - 黄 */
+        .cell.type-2 { background: #9b59b6; } /* T - 紫 */
+        .cell.type-3 { background: #2ecc71; } /* S - 緑 */
+        .cell.type-4 { background: #e74c3c; } /* Z - 赤 */
+        .cell.type-5 { background: #3498db; } /* J - 青 */
+        .cell.type-6 { background: #f39c12; } /* L - オレンジ */
+        
         .cell.current {
-            background: #28a745;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+            border: 2px solid #fff;
+            animation: pulse 1s ease-in-out infinite alternate;
         }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.6); }
+            100% { box-shadow: 0 0 12px rgba(255, 255, 255, 0.9); }
+        }
+        
         .status {
             margin: 10px 0;
-            padding: 10px;
-            background: #e9ecef;
-            border-radius: 5px;
+            padding: 15px;
+            background: #333;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
         }
+        .status h3 {
+            margin: 0 0 10px 0;
+            color: #007bff;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid #444;
+        }
+        .status-label {
+            font-weight: bold;
+        }
+        .status-value {
+            color: #4ecdc4;
+        }
+        
+        .game-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .info-box {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .info-box .label {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 5px;
+        }
+        .info-box .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4ecdc4;
+        }
+        
         .log {
             height: 200px;
             overflow-y: auto;
@@ -61,88 +130,261 @@
             color: #0f0;
             padding: 10px;
             font-family: monospace;
-            font-size: 12px;
+            font-size: 11px;
+            border-radius: 5px;
+            border: 1px solid #333;
         }
         button {
             margin: 5px;
-            padding: 8px 16px;
+            padding: 10px 16px;
             background: #007bff;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 5px;
             cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
         }
         button:hover {
             background: #0056b3;
         }
         button:disabled {
-            background: #6c757d;
+            background: #555;
             cursor: not-allowed;
         }
         input {
-            padding: 8px;
+            padding: 10px;
             margin: 5px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: #333;
+            color: #fff;
+            width: calc(100% - 20px);
+        }
+        input::placeholder {
+            color: #999;
+        }
+        
+        .control-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #333;
+            border-radius: 8px;
+        }
+        .control-section h3 {
+            margin: 0 0 15px 0;
+            color: #4ecdc4;
+            border-bottom: 2px solid #4ecdc4;
+            padding-bottom: 5px;
+        }
+        
+        .game-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .game-controls button {
+            padding: 15px;
+            font-size: 14px;
+        }
+        
+        .connection-status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .status-connected { background: #28a745; color: white; }
+        .status-disconnected { background: #dc3545; color: white; }
+        .status-connecting { background: #ffc107; color: black; }
+        
+        h1 {
+            text-align: center;
+            color: #4ecdc4;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .player-title {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .player1-title { color: #ff6b6b; }
+        .player2-title { color: #4ecdc4; }
+        
+        .next-piece, .hold-piece {
+            margin: 10px 0;
+            text-align: center;
+        }
+        .next-piece h4, .hold-piece h4 {
+            margin: 5px 0;
+            color: #999;
+            font-size: 12px;
+        }
+        .mini-board {
+            display: grid;
+            grid-template-columns: repeat(4, 15px);
+            grid-template-rows: repeat(4, 15px);
+            gap: 1px;
+            background: #000;
+            padding: 3px;
+            margin: 5px auto;
+            border: 1px solid #444;
+            max-width: fit-content;
+        }
+        .mini-cell {
+            width: 15px;
+            height: 15px;
+            background: #111;
         }
     </style>
 </head>
 <body>
-    <h1>GITRIS WebSocket Test Client</h1>
+    <h1>🎮 GITRIS - WebSocket Test Client 🎮</h1>
     
     <div class="container">
-        <div class="game-area">
-            <h2>ゲーム画面</h2>
-            <div>
-                <h3>ゲーム状態</h3>
-                <p>接続状態: <span id="connectionStatus" style="color: red;">未接続</span></p>
-                <p>ゲーム状態: <span id="gameStatus">待機中</span></p>
-                <p>プレイヤー1: <span id="player1Status">未参加</span></p>
-                <p>プレイヤー2: <span id="player2Status">未参加</span></p>
+        <div class="game-section">
+            <!-- プレイヤー1エリア -->
+            <div class="player-area">
+                <div class="player-title player1-title">👤 Player 1</div>
+                
+                <div class="status">
+                    <h3>ゲーム状態</h3>
+                    <div class="status-item">
+                        <span class="status-label">接続:</span>
+                        <span class="connection-status status-disconnected" id="connectionStatus">未接続</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">ゲーム:</span>
+                        <span class="status-value" id="gameStatus">待機中</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Player 1:</span>
+                        <span class="status-value" id="player1Status">未参加</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Player 2:</span>
+                        <span class="status-value" id="player2Status">未参加</span>
+                    </div>
+                </div>
+                
+                <div class="tetris-board" id="player1Board"></div>
+                
+                <div class="game-info">
+                    <div class="info-box">
+                        <div class="label">スコア</div>
+                        <div class="value" id="player1Score">0</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">レベル</div>
+                        <div class="value" id="player1Level">1</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">ライン</div>
+                        <div class="value" id="player1Lines">0</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">ゲームオーバー</div>
+                        <div class="value" id="player1GameOver">-</div>
+                    </div>
+                </div>
+                
+                <div class="next-piece">
+                    <h4>Next</h4>
+                    <div class="mini-board" id="player1Next"></div>
+                </div>
+                
+                <div class="hold-piece">
+                    <h4>Hold</h4>
+                    <div class="mini-board" id="player1Hold"></div>
+                </div>
             </div>
-            <div class="board" id="gameBoard"></div>
-            <div>
-                <p>スコア: <span id="score">0</span></p>
-                <p>レベル: <span id="level">1</span></p>
-                <p>ライン: <span id="lines">0</span></p>
+            
+            <!-- プレイヤー2エリア -->
+            <div class="player-area">
+                <div class="player-title player2-title">👤 Player 2</div>
+                
+                <div class="tetris-board" id="player2Board"></div>
+                
+                <div class="game-info">
+                    <div class="info-box">
+                        <div class="label">スコア</div>
+                        <div class="value" id="player2Score">0</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">レベル</div>
+                        <div class="value" id="player2Level">1</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">ライン</div>
+                        <div class="value" id="player2Lines">0</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">ゲームオーバー</div>
+                        <div class="value" id="player2GameOver">-</div>
+                    </div>
+                </div>
+                
+                <div class="next-piece">
+                    <h4>Next</h4>
+                    <div class="mini-board" id="player2Next"></div>
+                </div>
+                
+                <div class="hold-piece">
+                    <h4>Hold</h4>
+                    <div class="mini-board" id="player2Hold"></div>
+                </div>
             </div>
         </div>
         
+        <!-- コントロールパネル -->
         <div class="controls">
-            <h2>コントロール</h2>
+            <h2>🎛️ コントロール</h2>
             
-            <div>
-                <h3>接続設定</h3>
+            <div class="control-section">
+                <h3>🔌 接続設定</h3>
                 <input type="text" id="serverUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
                 <input type="text" id="roomId" placeholder="ルームID">
                 <input type="text" id="userId" placeholder="ユーザーID">
-                <input type="text" id="authToken" placeholder="認証トークン (Bearer ...)" style="width: 300px;">
-                <br>
-                <button onclick="connect()">接続</button>
-                <button onclick="disconnect()">切断</button>
+                <input type="text" id="authToken" placeholder="認証トークン (Bearer ...)" style="width: calc(100% - 20px);">
+                <button onclick="connectWebSocket()">🔗 WebSocket接続</button>
+                <button onclick="disconnect()">❌ 切断</button>
             </div>
             
-            <div>
-                <h3>ゲーム操作</h3>
-                <button onclick="sendAction('move_left')">← 左</button>
-                <button onclick="sendAction('move_right')">右 →</button>
-                <br>
-                <button onclick="sendAction('rotate')">回転</button>
-                <button onclick="sendAction('soft_drop')">ソフトドロップ</button>
-                <button onclick="sendAction('hard_drop')">ハードドロップ</button>
-                <button onclick="sendAction('hold')">ホールド</button>
+            <div class="control-section">
+                <h3>🎮 ゲーム操作</h3>
+                                 <div class="game-controls">
+                     <button onclick="sendAction('move_left')">⬅️ 左移動</button>
+                     <button onclick="sendAction('move_right')">➡️ 右移動</button>
+                     <button onclick="sendAction('rotate')">🔄 回転</button>
+                     <button onclick="sendAction('soft_drop')">⬇️ ソフト</button>
+                     <button onclick="sendAction('hard_drop')">⚡ ハード</button>
+                     <button onclick="sendAction('hold')">📦 ホールド</button>
+                 </div>
+                 <div style="margin-top: 10px; font-size: 12px; color: #999;">
+                     キーボード: ←→移動 ↑ハード ↓ソフト / Space=回転 / C=ホールド
+                 </div>
             </div>
             
-            <div>
-                <h3>ルーム操作</h3>
-                <button onclick="createRoom()">ルーム作成</button>
-                <button onclick="joinRoom()">ルーム参加</button>
+            <div class="control-section">
+                <h3>🏠 ルーム操作</h3>
+                <button onclick="createRoom()">🏗️ ルーム作成</button>
+                <button onclick="joinRoom()">🚪 ルーム参加</button>
             </div>
             
-            <div>
-                <h3>ログ</h3>
+            <div class="control-section">
+                <h3>📋 ログ</h3>
                 <div class="log" id="log"></div>
-                <button onclick="clearLog()">ログクリア</button>
+                <button onclick="clearLog()">🗑️ ログクリア</button>
             </div>
         </div>
     </div>
@@ -163,63 +405,94 @@
             document.getElementById('log').innerHTML = '';
         }
         
+        // 接続状態の更新
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.className = 'connection-status';
+            
+            switch(status) {
+                case 'connected':
+                    statusElement.textContent = '接続済み';
+                    statusElement.classList.add('status-connected');
+                    break;
+                case 'connecting':
+                    statusElement.textContent = '接続中';
+                    statusElement.classList.add('status-connecting');
+                    break;
+                case 'disconnected':
+                default:
+                    statusElement.textContent = '未接続';
+                    statusElement.classList.add('status-disconnected');
+                    break;
+            }
+        }
+        
         // WebSocket接続
-        function connect() {
-            const serverUrl = document.getElementById('serverUrl').value;
+        function connectWebSocket() {
             const roomId = document.getElementById('roomId').value;
-            const userId = document.getElementById('userId').value;
             const authToken = document.getElementById('authToken').value;
             
-            if (!roomId || !userId) {
-                alert('ルームIDとユーザーIDを入力してください');
+            if (!roomId) {
+                alert('ルームIDを入力してください');
                 return;
             }
             
-            // WebSocket URL（クエリパラメータなし）
-            let wsUrl = `${serverUrl.replace('http', 'ws')}/api/game/ws/${roomId}`;
+            if (!authToken) {
+                alert('認証トークンを入力してください');
+                return;
+            }
             
+            const wsUrl = `ws://localhost:8080/api/game/ws/${roomId}`;
             log(`WebSocket接続を試行中: ${wsUrl}`);
+            updateConnectionStatus('connecting');
             
-            // WebSocket接続を作成
             socket = new WebSocket(wsUrl);
             
-            // 接続確立後にAuthorizationヘッダーを送信
             socket.onopen = function(event) {
-                log('WebSocket接続が確立されました');
-                document.getElementById('connectionStatus').textContent = '接続済み';
-                document.getElementById('connectionStatus').style.color = 'green';
+                log('WebSocket接続が開かれました');
+                updateConnectionStatus('connected');
                 
-                // Authorizationヘッダーを送信
-                if (authToken) {
-                    const authMessage = {
-                        type: 'auth',
-                        token: authToken
-                    };
-                    socket.send(JSON.stringify(authMessage));
-                    log(`認証メッセージを送信: ${authToken.substring(0, 20)}...`);
-                } else {
-                    log('認証トークンが設定されていません');
-                }
+                // 認証メッセージを送信
+                const authMessage = {
+                    type: 'auth',
+                    token: authToken
+                };
+                socket.send(JSON.stringify(authMessage));
+                log('認証メッセージを送信しました');
             };
             
             socket.onmessage = function(event) {
-                log(`受信: ${event.data}`);
                 try {
                     const data = JSON.parse(event.data);
-                    handleGameMessage(data);
-                } catch (e) {
-                    log(`メッセージのパースエラー: ${e.message}`);
+                    
+                    // サーバーからの応答の種類を判定
+                    if (data.type) {
+                        // type フィールドがある場合（認証応答など）
+                        if (data.type === 'auth_success') {
+                            log('認証が成功しました');
+                        } else {
+                            handleGameMessage(data);
+                        }
+                    } else if (data.id && (data.player1 || data.player2)) {
+                        // GameSessionオブジェクトの場合
+                        updateGameState(data);
+                    } else {
+                        log(`未知のメッセージ形式: ${JSON.stringify(data).substring(0, 100)}...`);
+                    }
+                } catch (error) {
+                    log(`メッセージ解析エラー: ${error.message}`);
                 }
+            };
+            
+            socket.onerror = function(event) {
+                log(`WebSocketエラー: ${event}`);
+                updateConnectionStatus('disconnected');
             };
             
             socket.onclose = function(event) {
                 log(`WebSocket接続が閉じられました: ${event.code} - ${event.reason}`);
-                document.getElementById('connectionStatus').textContent = '未接続';
-                document.getElementById('connectionStatus').style.color = 'red';
-            };
-            
-            socket.onerror = function(error) {
-                log(`WebSocketエラー: ${error}`);
+                socket = null;
+                updateConnectionStatus('disconnected');
             };
         }
         
@@ -227,6 +500,202 @@
             if (socket) {
                 socket.close();
                 socket = null;
+            }
+        }
+        
+        // ボードキャッシュ - パフォーマンス改善のため
+        const boardCache = {};
+        
+        // テトリスボードの描画（パフォーマンス最適化版）
+        function drawTetrisBoard(boardId, boardData, currentPiece = null) {
+            const boardElement = document.getElementById(boardId);
+            if (!boardElement) return;
+            
+            // ボードが初期化されていない場合のみDOMを作成
+            if (!boardCache[boardId]) {
+                boardElement.innerHTML = '';
+                boardCache[boardId] = { cells: [], lastUpdate: null };
+                
+                // 20行 x 10列のセルを作成
+                for (let row = 0; row < 20; row++) {
+                    boardCache[boardId].cells[row] = [];
+                    for (let col = 0; col < 10; col++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'cell';
+                        boardCache[boardId].cells[row][col] = cell;
+                        boardElement.appendChild(cell);
+                    }
+                }
+            }
+            
+            const cells = boardCache[boardId].cells;
+            
+            // 全セルをリセット（効率的に）
+            for (let row = 0; row < 20; row++) {
+                for (let col = 0; col < 10; col++) {
+                    cells[row][col].className = 'cell';
+                }
+            }
+            
+            // ボードデータを適用
+            if (boardData && Array.isArray(boardData)) {
+                for (let row = 0; row < Math.min(20, boardData.length); row++) {
+                    if (Array.isArray(boardData[row])) {
+                        for (let col = 0; col < Math.min(10, boardData[row].length); col++) {
+                            const cellValue = boardData[row][col];
+                            if (cellValue && cellValue > 0) {
+                                // BlockType (1-7) を PieceType (0-6) に変換
+                                cells[row][col].classList.add(`type-${cellValue - 1}`);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 現在のピースを描画
+            if (currentPiece && typeof currentPiece.x === 'number' && typeof currentPiece.y === 'number' && typeof currentPiece.type === 'number') {
+                const pieceBlocks = getPieceBlocks(currentPiece.type, currentPiece.rotation || 0);
+                
+                for (const block of pieceBlocks) {
+                    const boardRow = currentPiece.y + block[1];
+                    const boardCol = currentPiece.x + block[0];
+                    
+                    if (boardRow >= 0 && boardRow < 20 && boardCol >= 0 && boardCol < 10) {
+                        cells[boardRow][boardCol].classList.add('current');
+                        // PieceType (0-6) をそのまま使用
+                        cells[boardRow][boardCol].classList.add(`type-${currentPiece.type}`);
+                    }
+                }
+            }
+        }
+        
+        // テトリミノの形状データを取得する関数
+        function getPieceBlocks(pieceType, rotation) {
+            const pieceShapes = {
+                0: [ // TypeI
+                    [[0, 1], [1, 1], [2, 1], [3, 1]], // 0度 (横)
+                    [[2, 0], [2, 1], [2, 2], [2, 3]], // 90度 (縦)
+                    [[0, 2], [1, 2], [2, 2], [3, 2]], // 180度 (横)
+                    [[1, 0], [1, 1], [1, 2], [1, 3]], // 270度 (縦)
+                ],
+                1: [ // TypeO
+                    [[0, 0], [1, 0], [0, 1], [1, 1]], // 全ての回転で同じ
+                ],
+                2: [ // TypeT
+                    [[1, 0], [0, 1], [1, 1], [2, 1]], // 0度
+                    [[1, 0], [1, 1], [2, 1], [1, 2]], // 90度
+                    [[0, 1], [1, 1], [2, 1], [1, 2]], // 180度
+                    [[0, 1], [1, 0], [1, 1], [1, 2]], // 270度
+                ],
+                3: [ // TypeS
+                    [[1, 0], [2, 0], [0, 1], [1, 1]], // 0度
+                    [[1, 0], [1, 1], [2, 1], [2, 2]], // 90度
+                    [[1, 1], [2, 1], [0, 2], [1, 2]], // 180度
+                    [[0, 0], [0, 1], [1, 1], [1, 2]], // 270度
+                ],
+                4: [ // TypeZ
+                    [[0, 0], [1, 0], [1, 1], [2, 1]], // 0度
+                    [[2, 0], [1, 1], [2, 1], [1, 2]], // 90度
+                    [[0, 1], [1, 1], [1, 2], [2, 2]], // 180度
+                    [[1, 0], [0, 1], [1, 1], [0, 2]], // 270度
+                ],
+                5: [ // TypeJ
+                    [[0, 0], [0, 1], [1, 1], [2, 1]], // 0度
+                    [[1, 0], [2, 0], [1, 1], [1, 2]], // 90度
+                    [[0, 1], [1, 1], [2, 1], [2, 2]], // 180度
+                    [[1, 0], [1, 1], [0, 2], [1, 2]], // 270度
+                ],
+                6: [ // TypeL
+                    [[2, 0], [0, 1], [1, 1], [2, 1]], // 0度
+                    [[1, 0], [1, 1], [1, 2], [2, 2]], // 90度
+                    [[0, 1], [1, 1], [2, 1], [0, 2]], // 180度
+                    [[0, 0], [1, 0], [1, 1], [1, 2]], // 270度
+                ],
+            };
+            
+            const shapes = pieceShapes[pieceType];
+            if (!shapes) {
+                log(`Unknown piece type: ${pieceType}`);
+                return [];
+            }
+            
+            // Oミノは回転しない
+            if (pieceType === 1) {
+                return shapes[0];
+            }
+            
+            const rotIdx = Math.floor((rotation || 0) / 90) % 4;
+            return shapes[rotIdx] || shapes[0];
+        }
+        
+        // ミニボードキャッシュ
+        const miniBoardCache = {};
+        
+        // ミニボード（Next/Hold）の描画（最適化版）
+        function drawMiniBoard(boardId, pieceData) {
+            const boardElement = document.getElementById(boardId);
+            if (!boardElement) return;
+            
+            // ボードが初期化されていない場合のみDOMを作成
+            if (!miniBoardCache[boardId]) {
+                boardElement.innerHTML = '';
+                miniBoardCache[boardId] = { cells: [], lastPieceType: null };
+                
+                // 4x4のセルを作成
+                for (let row = 0; row < 4; row++) {
+                    miniBoardCache[boardId].cells[row] = [];
+                    for (let col = 0; col < 4; col++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'mini-cell';
+                        miniBoardCache[boardId].cells[row][col] = cell;
+                        boardElement.appendChild(cell);
+                    }
+                }
+            }
+            
+            const cells = miniBoardCache[boardId].cells;
+            const cache = miniBoardCache[boardId];
+            
+            // ピースタイプが変わった場合のみ更新
+            const pieceType = pieceData ? pieceData.type : null;
+            if (cache.lastPieceType === pieceType) {
+                return; // 変更なしなのでスキップ
+            }
+            cache.lastPieceType = pieceType;
+            
+            // 全セルをリセット
+            for (let row = 0; row < 4; row++) {
+                for (let col = 0; col < 4; col++) {
+                    cells[row][col].className = 'mini-cell';
+                }
+            }
+            
+            // ピースデータを適用
+            if (pieceData && typeof pieceData.type === 'number') {
+                const pieceBlocks = getPieceBlocks(pieceData.type, 0); // ミニボードは常に0度回転で表示
+                
+                if (pieceBlocks.length > 0) {
+                    // ピースを中央寄せするためのオフセット計算
+                    let minX = Math.min(...pieceBlocks.map(b => b[0]));
+                    let minY = Math.min(...pieceBlocks.map(b => b[1]));
+                    let maxX = Math.max(...pieceBlocks.map(b => b[0]));
+                    let maxY = Math.max(...pieceBlocks.map(b => b[1]));
+                    
+                    const pieceWidth = maxX - minX + 1;
+                    const pieceHeight = maxY - minY + 1;
+                    const offsetX = Math.floor((4 - pieceWidth) / 2) - minX;
+                    const offsetY = Math.floor((4 - pieceHeight) / 2) - minY;
+                    
+                    for (const block of pieceBlocks) {
+                        const row = block[1] + offsetY;
+                        const col = block[0] + offsetX;
+                        
+                        if (row >= 0 && row < 4 && col >= 0 && col < 4) {
+                            // PieceType (0-6) をそのまま使用
+                            cells[row][col].classList.add(`type-${pieceData.type}`);
+                        }
+                    }
+                }
             }
         }
         
@@ -245,8 +714,51 @@
             log(`送信: ${JSON.stringify(message)}`);
         }
         
+        // デッキIDを取得する関数
+        async function getDeckId() {
+            const authToken = document.getElementById('authToken').value;
+            const userId = document.getElementById('userId').value;
+            
+            if (!authToken || !userId) {
+                log('認証トークンとユーザーIDが必要です');
+                return null;
+            }
+            
+            // 認証トークンにBearerプレフィックスが付いていない場合は追加
+            let authHeader = authToken;
+            if (!authToken.startsWith('Bearer ')) {
+                authHeader = `Bearer ${authToken}`;
+            }
+            
+            try {
+                const response = await fetch(`/api/protected/deck/${userId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': authHeader
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`デッキ取得エラー: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                log(`デッキ取得結果: ${JSON.stringify(data)}`);
+                
+                if (data && data.deck && data.deck.id) {
+                    return data.deck.id;
+                } else {
+                    log('デッキIDが見つかりません');
+                    return null;
+                }
+            } catch (error) {
+                log(`デッキ取得エラー: ${error.message}`);
+                return null;
+            }
+        }
+        
         // ルーム作成
-        function createRoom() {
+        async function createRoom() {
             const userId = document.getElementById('userId').value;
             const authToken = document.getElementById('authToken').value;
             
@@ -255,19 +767,34 @@
                 return;
             }
             
+            if (!authToken) {
+                alert('認証トークンを入力してください');
+                return;
+            }
+            
+            // まずデッキIDを取得
+            const deckId = await getDeckId();
+            if (!deckId) {
+                log('デッキIDの取得に失敗しました');
+                return;
+            }
+            
+            // 認証トークンにBearerプレフィックスが付いていない場合は追加
+            let authHeader = authToken;
+            if (!authToken.startsWith('Bearer ')) {
+                authHeader = `Bearer ${authToken}`;
+            }
+            
             const headers = {
                 'Content-Type': 'application/json',
+                'Authorization': authHeader
             };
-            
-            if (authToken) {
-                headers['Authorization'] = authToken;
-            }
             
             fetch('/api/game/room', {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({
-                    deck_id: 'test-deck-id'
+                    deck_id: deckId
                 })
             })
             .then(response => response.json())
@@ -283,7 +810,7 @@
         }
         
         // ルーム参加
-        function joinRoom() {
+        async function joinRoom() {
             const roomId = document.getElementById('roomId').value;
             const userId = document.getElementById('userId').value;
             const authToken = document.getElementById('authToken').value;
@@ -293,19 +820,34 @@
                 return;
             }
             
+            if (!authToken) {
+                alert('認証トークンを入力してください');
+                return;
+            }
+            
+            // まずデッキIDを取得
+            const deckId = await getDeckId();
+            if (!deckId) {
+                log('デッキIDの取得に失敗しました');
+                return;
+            }
+            
+            // 認証トークンにBearerプレフィックスが付いていない場合は追加
+            let authHeader = authToken;
+            if (!authToken.startsWith('Bearer ')) {
+                authHeader = `Bearer ${authToken}`;
+            }
+            
             const headers = {
                 'Content-Type': 'application/json',
+                'Authorization': authHeader
             };
-            
-            if (authToken) {
-                headers['Authorization'] = authToken;
-            }
             
             fetch(`/api/game/room/${roomId}/join`, {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({
-                    deck_id: 'test-deck-id'
+                    deck_id: deckId
                 })
             })
             .then(response => response.json())
@@ -334,23 +876,68 @@
             }
         }
         
-        // ゲーム状態の更新
+        // ゲーム状態のキャッシュ（重複更新を避けるため）
+        let lastGameStateUpdate = 0;
+        
+        // ゲーム状態の更新（パフォーマンス最適化版）
         function updateGameState(data) {
+            // 更新頻度を制限（60fps制限）
+            const now = Date.now();
+            if (now - lastGameStateUpdate < 16) { // 約60fps
+                return;
+            }
+            lastGameStateUpdate = now;
+            
             gameState = data;
-            document.getElementById('gameStatus').textContent = data.status || '進行中';
             
+            // ゲームステータスの更新
+            const gameStatus = data.status || '不明';
+            document.getElementById('gameStatus').textContent = gameStatus;
+            
+            // プレイヤー1の状態更新
             if (data.player1) {
-                document.getElementById('player1Status').textContent = `参加済み (スコア: ${data.player1.score || 0})`;
-            }
-            if (data.player2) {
-                document.getElementById('player2Status').textContent = `参加済み (スコア: ${data.player2.score || 0})`;
+                const player1Status = `参加済み (ID: ${data.player1.user_id || 'N/A'})`;
+                document.getElementById('player1Status').textContent = player1Status;
+                
+                // プレイヤー1のゲーム情報更新
+                document.getElementById('player1Score').textContent = data.player1.score || 0;
+                document.getElementById('player1Level').textContent = data.player1.level || 1;
+                document.getElementById('player1Lines').textContent = data.player1.lines_cleared || 0;
+                document.getElementById('player1GameOver').textContent = data.player1.is_game_over ? 'YES' : 'NO';
+                
+                // プレイヤー1のボード描画
+                drawTetrisBoard('player1Board', data.player1.board, data.player1.current_piece);
+                
+                // Next/Holdピース描画
+                drawMiniBoard('player1Next', data.player1.next_piece);
+                drawMiniBoard('player1Hold', data.player1.held_piece);
+            } else {
+                document.getElementById('player1Status').textContent = '未参加';
             }
             
-            // ゲームボードの更新（簡易版）
-            const board = document.getElementById('gameBoard');
-            if (data.board) {
-                board.innerHTML = '<pre>' + JSON.stringify(data.board, null, 2) + '</pre>';
+            // プレイヤー2の状態更新
+            if (data.player2) {
+                const player2Status = `参加済み (ID: ${data.player2.user_id || 'N/A'})`;
+                document.getElementById('player2Status').textContent = player2Status;
+                
+                // プレイヤー2のゲーム情報更新
+                document.getElementById('player2Score').textContent = data.player2.score || 0;
+                document.getElementById('player2Level').textContent = data.player2.level || 1;
+                document.getElementById('player2Lines').textContent = data.player2.lines_cleared || 0;
+                document.getElementById('player2GameOver').textContent = data.player2.is_game_over ? 'YES' : 'NO';
+                
+                // プレイヤー2のボード描画
+                drawTetrisBoard('player2Board', data.player2.board, data.player2.current_piece);
+                
+                // Next/Holdピース描画
+                drawMiniBoard('player2Next', data.player2.next_piece);
+                drawMiniBoard('player2Hold', data.player2.held_piece);
+            } else {
+                document.getElementById('player2Status').textContent = '未参加';
             }
+            
+            // ゲーム状態変更のみログに記録
+            log(`Game Status: ${gameStatus} | P1: ${data.player1 ? 'OK' : 'NO'} | P2: ${data.player2 ? 'OK' : 'NO'}`);
         }
         
         // ルーム状態の更新
@@ -381,14 +968,12 @@
                     sendAction('soft_drop');
                     break;
                 case 'ArrowUp':
-                case 'z':
-                case 'Z':
                     event.preventDefault();
-                    sendAction('rotate');
+                    sendAction('hard_drop');
                     break;
                 case ' ':
                     event.preventDefault();
-                    sendAction('hard_drop');
+                    sendAction('rotate');
                     break;
                 case 'c':
                 case 'C':
@@ -400,8 +985,21 @@
         
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
-            log('GITRIS WebSocket Test Client が読み込まれました');
-            updateBoard([]);
+            log('🎮 GITRIS WebSocket Test Client が読み込まれました');
+            
+            // ボードを遅延初期化（パフォーマンス改善）
+            setTimeout(() => {
+                drawTetrisBoard('player1Board', []);
+                drawTetrisBoard('player2Board', []);
+                
+                // ミニボードも初期化
+                drawMiniBoard('player1Next', null);
+                drawMiniBoard('player1Hold', null);
+                drawMiniBoard('player2Next', null);
+                drawMiniBoard('player2Hold', null);
+            }, 100);
+            
+            updateConnectionStatus('disconnected');
         });
     </script>
 </body>

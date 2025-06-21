@@ -56,7 +56,7 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			state.CurrentPiece.X++
 			moved = true
 		}
-	case "rotate":
+	case "rotate", "rotate_right":
 		tempPiece.Rotate() // 時計回りに回転
 		// 回転後の衝突判定と壁蹴り (Wall Kick) ロジックをここに実装
 		// SRS (Super Rotation System) は複雑なので、最初は単純な衝突判定から始めるのが良いでしょう。
@@ -68,6 +68,17 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			// 例えば、特定のオフセットで再試行する
 			// if !state.Board.HasCollision(tempPiece, -1, 0) { state.CurrentPiece.X--; state.CurrentPiece.Rotate(); moved = true }
 		}
+	case "rotate_left":
+		// 反時計回りに回転（3回時計回りに回転することで実現）
+		tempPiece.Rotate()
+		tempPiece.Rotate()
+		tempPiece.Rotate()
+		if !state.Board.HasCollision(tempPiece, 0, 0) {
+			state.CurrentPiece.Rotate()
+			state.CurrentPiece.Rotate()
+			state.CurrentPiece.Rotate()
+			moved = true
+		}
 	case "soft_drop": // 通常落下を加速
 		if !state.Board.HasCollision(tempPiece, 0, 1) {
 			state.CurrentPiece.Y++
@@ -75,6 +86,7 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			moved = true
 		} else {
 			// 着地した場合はピースを固定
+			state.Board.MergePiece(state.CurrentPiece) // ← この行が欠落していた！
 			handlePieceLock(state)
 		}
 		state.lastFallTime = time.Now() // ソフトドロップしたら落下タイマーをリセット
@@ -108,8 +120,22 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			// 次のピースを現在のピースとして設定
 			state.CurrentPiece = state.NextPiece
 			state.NextPiece = state.GetNextPieceFromQueue()
-			state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-			state.CurrentPiece.Y = 0
+			// テトリミノの種類に応じた適切な初期位置を設定
+			switch state.CurrentPiece.Type {
+			case tetris.TypeI:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 2
+				state.CurrentPiece.Y = -1
+			case tetris.TypeO:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = 0
+			case tetris.TypeL:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = 0
+			default:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = -1
+			}
+			state.CurrentPiece.Rotation = 0
 			moved = true
 		} else {
 			// 現在のピースのコピーを作成
@@ -121,8 +147,22 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			}
 			// ホールドピースを現在のピースとして設定
 			state.CurrentPiece = state.HeldPiece
-			state.CurrentPiece.X = tetris.BoardWidth/2 - 2
-			state.CurrentPiece.Y = 0
+			// テトリミノの種類に応じた適切な初期位置を設定
+			switch state.CurrentPiece.Type {
+			case tetris.TypeI:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 2
+				state.CurrentPiece.Y = -1
+			case tetris.TypeO:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = 0
+			case tetris.TypeL:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = 0
+			default:
+				state.CurrentPiece.X = tetris.BoardWidth/2 - 1
+				state.CurrentPiece.Y = -1
+			}
+			state.CurrentPiece.Rotation = 0
 			// 現在のピースのコピーをホールドピースとして設定
 			state.HeldPiece = currentPieceCopy
 			moved = true

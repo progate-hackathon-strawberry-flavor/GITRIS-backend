@@ -8,8 +8,8 @@ import (
 	"os"   // Added for os.Getenv
 	"time" // Added for time.Time
 
-	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5" // Added for JWT parsing
+	"github.com/gorilla/mux"       // gorilla/muxをインポート
 	"github.com/gorilla/websocket" // WebSocketライブラリ
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
@@ -76,27 +76,35 @@ func WriteJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) 
 // CreateRoom は新しいゲームセッション（部屋）を作成するためのHTTPハンドラーです。
 // リクエストボディからデッキIDを取得し、セッションマネージャーに部屋の作成を依頼します。
 func (h *GameHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[GameHandler] CreateRoom called")
+	
 	// ユーザー認証情報をコンテキストから取得する
 	userID, err := ExtractUserIDFromContext(r) // api/handlers/auth_utils.go の関数を使用
 	if err != nil {
-		// 認証ミドルウェアが適用されていない場合、テスト用のユーザーIDを使用
-		log.Printf("[GameHandler] No user ID in context, using test user ID")
-		userID = "test-user-123"
+		log.Printf("[GameHandler] Failed to extract user ID: %v", err)
+		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
+		return
 	}
+	log.Printf("[GameHandler] User ID extracted: %s", userID)
 
 	// リクエストボディからプレイヤーのデッキIDを取得
 	var req struct {
 		DeckID string `json:"deck_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[GameHandler] Failed to parse request body: %v", err)
 		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディのパースに失敗しました")
 		return
 	}
+	log.Printf("[GameHandler] Request parsed, deck_id: %s", req.DeckID)
+	
 	if req.DeckID == "" {
+		log.Printf("[GameHandler] Deck ID is empty")
 		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
 		return
 	}
 
+	log.Printf("[GameHandler] Calling sessionManager.CreateSession for user %s with deck %s", userID, req.DeckID)
 	// セッションマネージャーに新しいルームの作成を依頼
 	roomID, err := h.sessionManager.CreateSession(userID, req.DeckID)
 	if err != nil {
@@ -105,38 +113,51 @@ func (h *GameHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[GameHandler] Room created successfully: %s", roomID)
 	WriteJSONResponse(w, http.StatusCreated, map[string]string{"room_id": roomID, "message": "ルームを作成しました"})
 }
 
 // JoinRoom は既存のゲームセッション（部屋）に参加するためのHTTPハンドラーです。
 // URLパラメータからroomIDを、リクエストボディからデッキIDを取得します。
 func (h *GameHandler) JoinRoom(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[GameHandler] JoinRoom called")
+	
 	// ユーザー認証情報をコンテキストから取得する
 	userID, err := ExtractUserIDFromContext(r) // api/handlers/auth_utils.go の関数を使用
 	if err != nil {
-		// 認証ミドルウェアが適用されていない場合、テスト用のユーザーIDを使用
-		log.Printf("[GameHandler] No user ID in context, using test user ID")
-		userID = "test-user-123"
+		log.Printf("[GameHandler] Failed to extract user ID for join room: %v", err)
+		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
+		return
 	}
+	log.Printf("[GameHandler] User ID extracted for join room: %s", userID)
 
-	roomID := chi.URLParam(r, "roomID") // URLパラメータからroomIDを取得
+	vars := mux.Vars(r)
+	roomID := vars["roomID"] // gorilla/muxのVarsを使用
 	if roomID == "" {
+		log.Printf("[GameHandler] Missing roomID in join room request")
 		WriteErrorResponse(w, http.StatusBadRequest, "ルームIDが必要です")
 		return
 	}
+	log.Printf("[GameHandler] Room ID for join: %s", roomID)
 
+	// リクエストボディからプレイヤーのデッキIDを取得
 	var req struct {
 		DeckID string `json:"deck_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディのパースに失敗しました")
+		log.Printf("[GameHandler] Failed to parse join room request body: %v", err)
+		WriteErrorResponse(w, http.StatusBadRequest, "リクエストボディの解析に失敗しました")
 		return
 	}
 	if req.DeckID == "" {
+		log.Printf("[GameHandler] Missing deck_id in join room request")
 		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
 		return
 	}
+	log.Printf("[GameHandler] Request parsed for join room, deck_id: %s", req.DeckID)
 
+	log.Printf("[GameHandler] Calling sessionManager.JoinSession for user %s, room %s, deck %s", userID, roomID, req.DeckID)
+	
 	// セッションマネージャーに既存のルームへの参加を依頼
 	err = h.sessionManager.JoinSession(roomID, userID, req.DeckID)
 	if err != nil {
@@ -145,12 +166,14 @@ func (h *GameHandler) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[GameHandler] User %s successfully joined room %s", userID, roomID)
 	WriteJSONResponse(w, http.StatusOK, map[string]string{"message": "ルームに参加しました", "room_id": roomID})
 }
 
 // GetRoomStatus は特定のルームの現在の状態を返すハンドラーです。（デバッグやルーム一覧表示用）
 func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
-	roomID := chi.URLParam(r, "roomID")
+	vars := mux.Vars(r)
+	roomID := vars["roomID"] // gorilla/muxのVarsを使用
 	if roomID == "" {
 		WriteErrorResponse(w, http.StatusBadRequest, "ルームIDが必要です")
 		return
@@ -170,11 +193,29 @@ func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 // その後、WebSocketメッセージの送受信をセッションマネージャーに引き渡します。
 // このエンドポイントにはルームIDが含まれます。
 func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.Request) {
-	roomID := chi.URLParam(r, "roomID")
+	log.Printf("[GameHandler] WebSocket connection attempt for room: %s", r.URL.Path)
+	
+	vars := mux.Vars(r)
+	log.Printf("[GameHandler] mux.Vars result: %+v", vars)
+	roomID := vars["roomID"] // gorilla/muxのVarsを使用
+	log.Printf("[GameHandler] Extracted roomID: '%s'", roomID)
+	
 	if roomID == "" {
+		log.Printf("[GameHandler] Missing roomID in WebSocket connection")
 		WriteErrorResponse(w, http.StatusBadRequest, "WebSocket接続にはルームIDが必要です")
 		return
 	}
+
+	// ルームが存在するかどうかを確認
+	session, exists := h.sessionManager.GetGameSession(roomID)
+	if !exists {
+		log.Printf("[GameHandler] Room %s does not exist", roomID)
+		WriteErrorResponse(w, http.StatusNotFound, "指定されたルームは存在しません")
+		return
+	}
+	log.Printf("[GameHandler] Room %s exists, status: %s", roomID, session.Status)
+
+	log.Printf("[GameHandler] Attempting to upgrade connection for room: %s", roomID)
 
 	// HTTP接続をWebSocket接続にアップグレード
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -184,10 +225,11 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 	}
 	// defer conn.Close() // ここでは閉じない。SessionManagerが管理するため。
 
-	log.Printf("[GameHandler] WebSocket upgraded for room %s.", roomID)
+	log.Printf("[GameHandler] WebSocket upgraded successfully for room %s.", roomID)
 
 	// 認証メッセージを待つ
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) // 10秒のタイムアウト
+	log.Printf("[GameHandler] Waiting for auth message from client...")
 	
 	var userID string
 	authReceived := false
@@ -201,6 +243,8 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 			return
 		}
 		
+		log.Printf("[GameHandler] Received message: %s", string(message))
+		
 		var authMsg struct {
 			Type  string `json:"type"`
 			Token string `json:"token"`
@@ -211,6 +255,8 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 			conn.Close()
 			return
 		}
+		
+		log.Printf("[GameHandler] Parsed auth message - Type: %s, Token length: %d", authMsg.Type, len(authMsg.Token))
 		
 		if authMsg.Type == "auth" {
 			// JWTトークンの検証（auth_middleware.goと同じロジック）
@@ -280,6 +326,7 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 			
 			authReceived = true
 			// 認証成功レスポンスを送信
+			log.Printf("[GameHandler] Sending auth success response to client")
 			conn.WriteJSON(map[string]string{"type": "auth_success", "message": "Authentication successful"})
 		} else {
 			log.Printf("[GameHandler] Unexpected message type: %s", authMsg.Type)
@@ -291,6 +338,7 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 
 	// タイムアウトを解除
 	conn.SetReadDeadline(time.Time{})
+	log.Printf("[GameHandler] Auth completed, registering client %s to room %s", userID, roomID)
 
 	// SessionManager に新しいWebSocket接続を登録
 	err = h.sessionManager.RegisterClient(roomID, userID, conn)
@@ -300,7 +348,19 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	log.Printf("[GameHandler] Successfully registered client %s to room %s", userID, roomID)
+	
+	// ゲーム開始条件をチェック
+	log.Printf("[GameHandler] Checking game start conditions for room %s", roomID)
+	go func() {
+		// ちょっと待ってからチェック（RegisterClientの処理が完了するのを待つ）
+		time.Sleep(100 * time.Millisecond)
+		h.sessionManager.CheckAndStartGame(roomID)
+	}()
+
 	// RegisterClient内で readPump と writePump ゴルーチンが開始されるため、
 	// ここではそれ以上の処理は不要です。ハンドラーは単にコネクションを引き渡すだけです。
 	// コネクションが閉じられるまで、このハンドラーは「ぶら下がる」ことになります。
 }
+
+
