@@ -434,7 +434,7 @@
             
             <div class="control-section">
                 <h3>🔌 接続設定</h3>
-                <input type="text" id="serverUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
+                <input type="text" id="serverUrl" value="" placeholder="WebSocket URL">
                 <input type="text" id="passcode" placeholder="合言葉（3-20文字）" maxlength="20" minlength="3">
                 <input type="text" id="userId" placeholder="ユーザーID">
                 <input type="text" id="authToken" placeholder="認証トークン (Bearer ...)" style="width: calc(100% - 20px);">
@@ -540,7 +540,10 @@
                 return;
             }
             
-            const wsUrl = `ws://localhost:8080/api/game/ws/${passcode}`;
+            // 動的にWebSocket URLを構築
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host || 'localhost:8080'; // フォールバック
+            const wsUrl = `${protocol}//${host}/api/game/ws/${passcode}`;
             log(`WebSocket接続を試行中: ${wsUrl}`);
             updateConnectionStatus('connecting');
             
@@ -1186,6 +1189,11 @@
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
             log('🎮 GITRIS WebSocket Test Client が読み込まれました');
+            
+            // WebSocket URLのデフォルト値を設定
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host || 'localhost:8080';
+            document.getElementById('serverUrl').value = `${protocol}//${host}`;
             
             // ボードを遅延初期化（パフォーマンス改善）
             setTimeout(() => {

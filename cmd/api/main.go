@@ -120,12 +120,18 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// ホスト設定を環境変数から取得
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "localhost" // 開発環境のデフォルト
+	}
+	
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
-	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://localhost:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", port)
-	fmt.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", port)
-	fmt.Printf("デッキを保存するには、認証トークンと以下のURLにPOSTリクエストを送ってください： http://localhost:%s/api/protected/deck/save\n", port)
-	fmt.Printf("テトリスゲームのテストクライアント: http://localhost:%s/test_websocket_client.html\n", port)
+	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://%s:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", host, port)
+	fmt.Printf("GitHubから最新のデータを取得してデータベースを更新するには、以下のURLにPOSTリクエストを送ってください： http://%s:%s/api/contributions/refresh/{あなたのSupabase usersテーブルのUUID}\n", host, port)
+	fmt.Printf("デッキを保存するには、認証トークンと以下のURLにPOSTリクエストを送ってください： http://%s:%s/api/protected/deck/save\n", host, port)
+	fmt.Printf("テトリスゲームのテストクライアント: http://%s:%s/test_websocket_client.html\n", host, port)
 
 	// シャットダウンシグナルの待機用チャネル
 	quit := make(chan os.Signal, 1)
