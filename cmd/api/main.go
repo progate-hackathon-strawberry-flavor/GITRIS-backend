@@ -51,8 +51,11 @@ func main() {
 	deckRepo := database.NewDeckRepository(databaseService.DB)
 	deckService := services.NewDeckService(databaseService.DB, deckRepo)
 
+	// ゲーム結果関連の依存関係の初期化
+	resultRepo := database.NewResultRepository(databaseService.DB)
+
 	// テトリスゲームのセッションマネージャーを初期化
-	sessionManager := tetris.NewSessionManager(databaseService, deckRepo)
+	sessionManager := tetris.NewSessionManager(databaseService, deckRepo, resultRepo)
 	// SessionManager.Run()はNewSessionManager内で既に開始されているため、重複実行を回避
 
 	// ハンドラ層の初期化
@@ -60,6 +63,7 @@ func main() {
 	deckSaveHandler := api.NewDeckSaveHandler(deckService) // デッキ保存ハンドラの初期化
 	deckGetHandler := api.NewDeckGetHandler(deckService) // デッキ取得ハンドラの初期化
 	gameHandler := api.NewGameHandler(sessionManager, databaseService) // ゲームハンドラの初期化
+	resultHandler := api.NewResultHandler(resultRepo) // ゲーム結果ハンドラの初期化
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
@@ -105,6 +109,11 @@ func main() {
 
 	// WebSocket接続（合言葉ベース）
 	r.HandleFunc("/api/game/ws/{passcode}", gameHandler.HandleWebSocketConnection)
+
+	// ゲーム結果関連のエンドポイント
+	r.HandleFunc("/api/results", resultHandler.GetTopResults).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/results", resultHandler.PostScore).Methods("POST", "OPTIONS")
+	r.HandleFunc("/api/results/user/{user_id}", resultHandler.GetUserResult).Methods("GET", "OPTIONS")
 
 	// ポート番号の設定
 	port := os.Getenv("PORT")

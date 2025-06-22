@@ -94,6 +94,7 @@ type SessionManager struct {
 	mu          sync.RWMutex                   // sessions と clients マップへのアクセスを保護するためのRWMutex
 	dbService   *database.DatabaseService      // データベース操作のためのサービス
 	deckRepo    database.DeckRepository        // デッキリポジトリ（テトリミノ配置データ取得用）
+	resultRepo database.ResultRepository       // ゲーム結果リポジトリ（スコア保存用）
 	lastBroadcast map[string]time.Time          // ルームごとの最後のブロードキャスト時刻
 	broadcastMu   sync.Mutex                    // lastBroadcastマップへのアクセス保護用
 }
@@ -103,9 +104,10 @@ type SessionManager struct {
 // Parameters:
 //   db : データベースサービスへのポインタ
 //   deckRepo : デッキリポジトリ
+//   resultRepo : ゲーム結果リポジトリ
 // Returns:
 //   *SessionManager: 初期化されたセッションマネージャーのポインタ
-func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository) *SessionManager {
+func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository, resultRepo database.ResultRepository) *SessionManager {
 	sm := &SessionManager{
 		sessions:    make(map[string]*GameSession),
 		clients:     make(map[string]*Client),
@@ -114,8 +116,9 @@ func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepos
 		broadcast:   make(chan *GameStateEvent, 512),   // ゲーム状態更新の頻度を考慮し、大きめのバッファ
 		inputEvents: make(chan PlayerInputEvent, 512), // プレイヤー操作のキューイング用
 		quit:        make(chan struct{}),
-		dbService:   db,
-		deckRepo:    deckRepo,
+		dbService:  db,
+		deckRepo:   deckRepo,
+		resultRepo: resultRepo,
 		lastBroadcast: make(map[string]time.Time),
 		broadcastMu: sync.Mutex{},
 	}
@@ -324,8 +327,6 @@ func (sm *SessionManager) Run() {
 	}
 }
 
-
-
 // CheckAndStartGame はセッションが開始条件を満たしているかチェックし、満たしていればゲームを開始します。
 //
 // Parameters:
@@ -418,16 +419,21 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocket.Conn) error {
 	log.Printf("[SessionManager] RegisterClient called for user %s with passcode %s", userID, passcode)
 
-	// 既存の接続があれば先にクリーンアップ（再接続対応）
+	// 既存の接続があれば状況に応じてクリーンアップ
 	sm.mu.Lock()
 	if existingClient, exists := sm.clients[userID]; exists {
-		log.Printf("[SessionManager] Replacing existing connection for user %s", userID)
-		if existingClient.Conn != nil {
-			existingClient.Conn.Close()
+		// 同一ユーザーの複数接続許可が有効な場合は、既存接続を保持
+		if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
+			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true - keeping existing connection for user %s", userID)
+		} else {
+			log.Printf("[SessionManager] Replacing existing connection for user %s", userID)
+			if existingClient.Conn != nil {
+				existingClient.Conn.Close()
+			}
+			// 安全なチャネル閉じ方を使用
+			existingClient.SafeClose()
+			delete(sm.clients, userID) // 明示的に削除
 		}
-		// 安全なチャネル閉じ方を使用
-		existingClient.SafeClose()
-		delete(sm.clients, userID) // 明示的に削除
 	}
 
 	// 新しいクライアントを作成
@@ -437,7 +443,22 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 		Send:   make(chan []byte, 512), // バッファサイズをさらに増加
 		RoomID: passcode, // 合言葉をRoomIDフィールドに格納
 	}
-	sm.clients[userID] = client
+	
+	// 同一ユーザーの複数接続許可が有効な場合は、常に新しい接続を登録
+	// （既存接続は上の処理で保持されている）
+	if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
+		sm.clients[userID] = client
+		log.Printf("[SessionManager] Client %s registered for passcode %s (ALLOW_SAME_USER_JOIN enabled)", userID, passcode)
+	} else {
+		// 通常モード：既存接続がない場合のみ登録
+		if _, exists := sm.clients[userID]; !exists {
+			sm.clients[userID] = client
+			log.Printf("[SessionManager] Client %s registered for passcode %s", userID, passcode)
+		} else {
+			sm.clients[userID] = client
+			log.Printf("[SessionManager] Client %s replaced for passcode %s", userID, passcode)
+		}
+	}
 	sm.mu.Unlock()
 
 	// WebSocket接続の基本設定（パフォーマンス最適化）
@@ -746,9 +767,8 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 		log.Printf("[SessionManager] Game session %s ended by OTHER REASON.", passcode)
 	}
 
-	// ゲーム結果をデータベースに記録する (TODO: database/database_service.go に実装)
-	// 例: sm.dbService.UpdateGameSessionResult(session)
-	// 例: sm.dbService.SaveGameResults(session)
+	// ゲーム結果をランキングデータベースに記録する
+	sm.saveGameResultsToRanking(session)
 
 	// クライアントにゲーム終了を通知 (最後の状態をブロードキャスト)
 	// mutexをアンロックしてからブロードキャスト（デッドロック回避）
@@ -852,6 +872,54 @@ func (sm *SessionManager) Shutdown() {
 	log.Printf("[SessionManager] シャットダウン完了")
 } 
 
+// saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをresultsテーブルに保存します
+func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
+	if session == nil {
+		log.Printf("[SessionManager] saveGameResultsToRanking called with nil session")
+		return
+	}
+
+	log.Printf("[SessionManager] Saving game results for session: %s", session.ID)
+
+	// プレイヤー1のスコアを保存
+	if session.Player1 != nil {
+		err := sm.savePlayerScore(session.Player1.UserID, session.Player1.Score, "Player1")
+		if err != nil {
+			log.Printf("[SessionManager] Failed to save Player1 score: %v", err)
+		}
+	}
+
+	// プレイヤー2のスコアを保存
+	if session.Player2 != nil {
+		err := sm.savePlayerScore(session.Player2.UserID, session.Player2.Score, "Player2")
+		if err != nil {
+			log.Printf("[SessionManager] Failed to save Player2 score: %v", err)
+		}
+	}
+}
+
+// savePlayerScore は個別のプレイヤーのスコアを保存します（result_handlerのロジックを使用）
+func (sm *SessionManager) savePlayerScore(userID string, score int, playerName string) error {
+	// result_handlerと同じバリデーション
+	if userID == "" {
+		return fmt.Errorf("user_idは必須です")
+	}
+	if score < 0 {
+		return fmt.Errorf("スコアは0以上である必要があります")
+	}
+
+	// resultsテーブルに保存
+	result, err := sm.resultRepo.CreateResult(nil, userID, score)
+	if err != nil {
+		log.Printf("[SessionManager] Failed to save %s (%s) score to results: %v", playerName, userID, err)
+		return fmt.Errorf("スコア保存に失敗しました: %w", err)
+	}
+
+	log.Printf("[SessionManager] Successfully saved %s (%s) score: %d (result ID: %d)", 
+		playerName, userID, score, result.ID)
+	return nil
+}
+
 // JoinRoomByPasscode は合言葉を使ってルームに参加します。
 // 合言葉のセッションが存在しない場合は新しく作成し、存在する場合は参加します。
 //
@@ -939,4 +1007,13 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 
 		return passcode, false, nil
 	}
+}
+
+// IsUserConnected は指定されたユーザーIDが現在接続中かどうかを確認します。
+func (sm *SessionManager) IsUserConnected(userID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	
+	_, connected := sm.clients[userID]
+	return connected
 } 
