@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 type UserIDKey struct{}
@@ -31,8 +32,10 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// テスト用: 環境変数で認証をバイパス可能にする
 		if os.Getenv("BYPASS_AUTH") == "true" {
-			// テスト用のユーザーIDを設定
-			ctx := context.WithValue(r.Context(), UserIDKey{}, "test-user-123")
+			// テスト用のランダムなユーザーIDを生成（毎回異なるユーザーとして扱う）
+			testUserID := uuid.New().String()
+			log.Printf("AuthMiddleware: BYPASS_AUTH enabled, generated test user ID: %s", testUserID)
+			ctx := context.WithValue(r.Context(), UserIDKey{}, testUserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}

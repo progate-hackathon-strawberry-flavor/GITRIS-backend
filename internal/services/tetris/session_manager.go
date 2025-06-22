@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -418,16 +419,21 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocket.Conn) error {
 	log.Printf("[SessionManager] RegisterClient called for user %s with passcode %s", userID, passcode)
 
-	// 既存の接続があれば先にクリーンアップ（再接続対応）
+	// 既存の接続があれば状況に応じてクリーンアップ
 	sm.mu.Lock()
 	if existingClient, exists := sm.clients[userID]; exists {
-		log.Printf("[SessionManager] Replacing existing connection for user %s", userID)
-		if existingClient.Conn != nil {
-			existingClient.Conn.Close()
+		// 同一ユーザーの複数接続許可が有効な場合は、既存接続を保持
+		if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
+			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true - keeping existing connection for user %s", userID)
+		} else {
+			log.Printf("[SessionManager] Replacing existing connection for user %s", userID)
+			if existingClient.Conn != nil {
+				existingClient.Conn.Close()
+			}
+			// 安全なチャネル閉じ方を使用
+			existingClient.SafeClose()
+			delete(sm.clients, userID) // 明示的に削除
 		}
-		// 安全なチャネル閉じ方を使用
-		existingClient.SafeClose()
-		delete(sm.clients, userID) // 明示的に削除
 	}
 
 	// 新しいクライアントを作成
@@ -437,7 +443,22 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 		Send:   make(chan []byte, 512), // バッファサイズをさらに増加
 		RoomID: passcode, // 合言葉をRoomIDフィールドに格納
 	}
-	sm.clients[userID] = client
+	
+	// 同一ユーザーの複数接続許可が有効な場合は、常に新しい接続を登録
+	// （既存接続は上の処理で保持されている）
+	if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
+		sm.clients[userID] = client
+		log.Printf("[SessionManager] Client %s registered for passcode %s (ALLOW_SAME_USER_JOIN enabled)", userID, passcode)
+	} else {
+		// 通常モード：既存接続がない場合のみ登録
+		if _, exists := sm.clients[userID]; !exists {
+			sm.clients[userID] = client
+			log.Printf("[SessionManager] Client %s registered for passcode %s", userID, passcode)
+		} else {
+			sm.clients[userID] = client
+			log.Printf("[SessionManager] Client %s replaced for passcode %s", userID, passcode)
+		}
+	}
 	sm.mu.Unlock()
 
 	// WebSocket接続の基本設定（パフォーマンス最適化）
@@ -922,4 +943,13 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 
 		return passcode, false, nil
 	}
+}
+
+// IsUserConnected は指定されたユーザーIDが現在接続中かどうかを確認します。
+func (sm *SessionManager) IsUserConnected(userID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	
+	_, connected := sm.clients[userID]
+	return connected
 } 

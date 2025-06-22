@@ -9,6 +9,7 @@ import (
 	"time" // Added for time.Time
 
 	"github.com/golang-jwt/jwt/v5" // Added for JWT parsing
+	"github.com/google/uuid"       // Added for uuid.New().String()
 	"github.com/gorilla/mux"       // gorilla/muxをインポート
 	"github.com/gorilla/websocket" // WebSocketライブラリ
 
@@ -73,8 +74,6 @@ func WriteJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) 
 	json.NewEncoder(w).Encode(data)
 }
 
-
-
 // GetRoomStatus は特定の合言葉のセッションの現在の状態を返すハンドラーです。（デバッグやセッション一覧表示用）
 func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -92,7 +91,6 @@ func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 
 	WriteJSONResponse(w, http.StatusOK, session)
 }
-
 
 // HandleWebSocketConnection はHTTP接続をWebSocketプロトコルにアップグレードし、
 // その後、WebSocketメッセージの送受信をセッションマネージャーに引き渡します。
@@ -165,9 +163,45 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 		
 		if authMsg.Type == "auth" {
 			// JWTトークンの検証（auth_middleware.goと同じロジック）
-			if authMsg.Token == "BYPASS_AUTH" {
-				userID = "test-user-123"
-				log.Printf("[GameHandler] Using BYPASS_AUTH for user: %s", userID)
+			// 環境変数でBYPASS_AUTHが有効な場合、またはトークンがBYPASS_AUTHの場合
+			if os.Getenv("BYPASS_AUTH") == "true" || authMsg.Token == "BYPASS_AUTH" {
+				// BYPASS_AUTHモードでは、未接続のプレイヤーIDを使用
+				session, sessionExists := h.sessionManager.GetGameSession(passcode)
+				if sessionExists {
+					// 各プレイヤーの接続状態をチェック
+					player1Connected := false
+					player2Connected := false
+					
+					if session.Player1 != nil {
+						player1Connected = h.sessionManager.IsUserConnected(session.Player1.UserID)
+					}
+					if session.Player2 != nil {
+						player2Connected = h.sessionManager.IsUserConnected(session.Player2.UserID)
+					}
+					
+					log.Printf("[GameHandler] Connection status - Player1: %v, Player2: %v", player1Connected, player2Connected)
+					
+					// 未接続のプレイヤーIDを優先的に使用
+					if session.Player1 != nil && !player1Connected {
+						userID = session.Player1.UserID
+						log.Printf("[GameHandler] Using Player1 ID (not connected): %s", userID)
+					} else if session.Player2 != nil && !player2Connected {
+						userID = session.Player2.UserID
+						log.Printf("[GameHandler] Using Player2 ID (not connected): %s", userID)
+					} else if session.Player1 != nil {
+						// 両方とも接続済みの場合、Player1のIDを使用（複数接続許可のため）
+						userID = session.Player1.UserID
+						log.Printf("[GameHandler] Using Player1 ID for additional connection: %s", userID)
+					} else {
+						// プレイヤーが存在しない場合、新しいUUIDを生成
+						userID = uuid.New().String()
+						log.Printf("[GameHandler] No players in session, generated test user ID: %s", userID)
+					}
+				} else {
+					// セッションが存在しない場合、新しいUUIDを生成
+					userID = uuid.New().String()
+					log.Printf("[GameHandler] No session found, generated test user ID: %s", userID)
+				}
 			} else {
 				// JWT Secretを取得
 				jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
