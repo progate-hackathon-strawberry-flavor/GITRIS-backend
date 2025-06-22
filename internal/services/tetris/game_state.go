@@ -305,11 +305,14 @@ func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tet
 				score = 100 // デフォルトスコア
 			}
 			piece.ScoreData[key] = score
+			
+			// デバッグログ: テトリミノのスコアデータ設定を確認
+			log.Printf("[DEBUG] Piece %d, Rotation %d, Block %d at (%d,%d) -> key: %s, score: %d", 
+				pieceType, rotationDegrees, i, block[0], block[1], key, score)
 		}
 	}
 
-	// ログ出力を削減（パフォーマンス改善）
-	// log.Printf("[PieceQueue] デッキから %d タイプのピースにスコア情報を設定しました", pieceType)
+	log.Printf("[PieceQueue] デッキから %d タイプのピースにスコア情報を設定しました (総キー数: %d)", pieceType, len(piece.ScoreData))
 	return piece
 }
 
@@ -397,8 +400,6 @@ func (s *PlayerGameState) GetPieceScoreAtPosition(piece *tetris.Piece, boardX, b
 	return 100 // 最終フォールバック
 }
 
-
-
 // SpawnNewPiece は新しいテトリミノをボード上に出現させます。
 // ゲームオーバーの判定も行われます。
 func (s *PlayerGameState) SpawnNewPiece() {
@@ -447,8 +448,6 @@ type GameSession struct {
 	OutputCh chan GameStateEvent   `json:"-"` // ゲーム状態の更新をブロードキャストするためのチャネル
 	GameLoopDone chan struct{}     `json:"-"` // ゲームループの終了を通知するチャネル
 }
-
-
 
 // PlayerInputEvent はクライアントからの操作入力を表す構造体です。
 // WebSocketを通じてサーバーに送信されます。
@@ -577,6 +576,7 @@ func (gs *GameSession) ToLightweight() *LightweightGameState {
 
 // updateCurrentPieceScores は現在のピースのスコア情報をCurrentPieceScoresマップに更新します。
 // これによりクライアント側で落下中のピースも正しい色で表示されます。
+// テトリミノのScoreDataが存在する場合はそれを優先し、ない場合はContributionScoresを使用します。
 func (s *PlayerGameState) updateCurrentPieceScores() {
 	// 現在のピースが存在しない場合は何もしない（早期リターン）
 	if s.CurrentPiece == nil {
@@ -599,19 +599,19 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
 			scoreKey := strconv.Itoa(boardY) + "_" + strconv.Itoa(boardX)
 			
-			// スコア取得ロジック（効率化）
+			// テトリミノのScoreDataを優先的に使用
 			score := 100 // デフォルトスコア
 			
-			if s.CurrentPiece.ScoreData != nil {
+			if s.CurrentPiece.ScoreData != nil && len(s.CurrentPiece.ScoreData) > 0 {
 				// ピース内の相対位置を計算
-				relativeX := block[0] // 直接blockから取得（効率化）
+				relativeX := block[0]
 				relativeY := block[1]
 				
 				// 現在の回転状態での位置キーを作成
 				rotationKey := "rot_" + strconv.Itoa(s.CurrentPiece.Rotation) + "_" + strconv.Itoa(relativeX) + "_" + strconv.Itoa(relativeY)
 				
 				// ピースのスコアデータから取得を試みる
-				if pieceScore, exists := s.CurrentPiece.ScoreData[rotationKey]; exists && pieceScore > 0 {
+				if pieceScore, exists := s.CurrentPiece.ScoreData[rotationKey]; exists {
 					score = pieceScore
 				} else if contributionScore, exists := s.ContributionScores[scoreKey]; exists {
 					score = contributionScore
