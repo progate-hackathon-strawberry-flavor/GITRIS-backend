@@ -93,6 +93,7 @@ type SessionManager struct {
 	mu          sync.RWMutex                   // sessions と clients マップへのアクセスを保護するためのRWMutex
 	dbService   *database.DatabaseService      // データベース操作のためのサービス
 	deckRepo    database.DeckRepository        // デッキリポジトリ（テトリミノ配置データ取得用）
+	resultRepo database.ResultRepository       // ゲーム結果リポジトリ（スコア保存用）
 	lastBroadcast map[string]time.Time          // ルームごとの最後のブロードキャスト時刻
 	broadcastMu   sync.Mutex                    // lastBroadcastマップへのアクセス保護用
 }
@@ -102,9 +103,10 @@ type SessionManager struct {
 // Parameters:
 //   db : データベースサービスへのポインタ
 //   deckRepo : デッキリポジトリ
+//   resultRepo : ゲーム結果リポジトリ
 // Returns:
 //   *SessionManager: 初期化されたセッションマネージャーのポインタ
-func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository) *SessionManager {
+func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository, resultRepo database.ResultRepository) *SessionManager {
 	sm := &SessionManager{
 		sessions:    make(map[string]*GameSession),
 		clients:     make(map[string]*Client),
@@ -113,8 +115,9 @@ func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepos
 		broadcast:   make(chan *GameStateEvent, 512),   // ゲーム状態更新の頻度を考慮し、大きめのバッファ
 		inputEvents: make(chan PlayerInputEvent, 512), // プレイヤー操作のキューイング用
 		quit:        make(chan struct{}),
-		dbService:   db,
-		deckRepo:    deckRepo,
+		dbService:  db,
+		deckRepo:   deckRepo,
+		resultRepo: resultRepo,
 		lastBroadcast: make(map[string]time.Time),
 		broadcastMu: sync.Mutex{},
 	}
@@ -322,8 +325,6 @@ func (sm *SessionManager) Run() {
 		}
 	}
 }
-
-
 
 // CheckAndStartGame はセッションが開始条件を満たしているかチェックし、満たしていればゲームを開始します。
 //
@@ -745,9 +746,8 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 		log.Printf("[SessionManager] Game session %s ended by OTHER REASON.", passcode)
 	}
 
-	// ゲーム結果をデータベースに記録する (TODO: database/database_service.go に実装)
-	// 例: sm.dbService.UpdateGameSessionResult(session)
-	// 例: sm.dbService.SaveGameResults(session)
+	// ゲーム結果をランキングデータベースに記録する
+	sm.saveGameResultsToRanking(session)
 
 	// クライアントにゲーム終了を通知 (最後の状態をブロードキャスト)
 	// mutexをアンロックしてからブロードキャスト（デッドロック回避）
@@ -811,6 +811,34 @@ func (sm *SessionManager) Shutdown() {
 	
 	log.Printf("[SessionManager] シャットダウン完了")
 } 
+
+// saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをランキングに保存します
+func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
+	if session == nil {
+		log.Printf("[SessionManager] saveGameResultsToRanking called with nil session")
+		return
+	}
+
+	// プレイヤー1のスコアを保存
+	if session.Player1 != nil {
+		_, err := sm.resultRepo.CreateResult(nil, session.Player1.UserID, session.Player1.Score)
+		if err != nil {
+			log.Printf("[SessionManager] Failed to save Player1 score to results: %v", err)
+		} else {
+			log.Printf("[SessionManager] Successfully saved Player1 (%s) score: %d", session.Player1.UserID, session.Player1.Score)
+		}
+	}
+
+	// プレイヤー2のスコアを保存
+	if session.Player2 != nil {
+		_, err := sm.resultRepo.CreateResult(nil, session.Player2.UserID, session.Player2.Score)
+		if err != nil {
+			log.Printf("[SessionManager] Failed to save Player2 score to results: %v", err)
+		} else {
+			log.Printf("[SessionManager] Successfully saved Player2 (%s) score: %d", session.Player2.UserID, session.Player2.Score)
+		}
+	}
+}
 
 // JoinRoomByPasscode は合言葉を使ってルームに参加します。
 // 合言葉のセッションが存在しない場合は新しく作成し、存在する場合は参加します。
