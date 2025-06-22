@@ -833,32 +833,52 @@ func (sm *SessionManager) Shutdown() {
 	log.Printf("[SessionManager] シャットダウン完了")
 } 
 
-// saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをランキングに保存します
+// saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをresultsテーブルに保存します
 func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
 	if session == nil {
 		log.Printf("[SessionManager] saveGameResultsToRanking called with nil session")
 		return
 	}
 
+	log.Printf("[SessionManager] Saving game results for session: %s", session.ID)
+
 	// プレイヤー1のスコアを保存
 	if session.Player1 != nil {
-		_, err := sm.resultRepo.CreateResult(nil, session.Player1.UserID, session.Player1.Score)
+		err := sm.savePlayerScore(session.Player1.UserID, session.Player1.Score, "Player1")
 		if err != nil {
-			log.Printf("[SessionManager] Failed to save Player1 score to results: %v", err)
-		} else {
-			log.Printf("[SessionManager] Successfully saved Player1 (%s) score: %d", session.Player1.UserID, session.Player1.Score)
+			log.Printf("[SessionManager] Failed to save Player1 score: %v", err)
 		}
 	}
 
 	// プレイヤー2のスコアを保存
 	if session.Player2 != nil {
-		_, err := sm.resultRepo.CreateResult(nil, session.Player2.UserID, session.Player2.Score)
+		err := sm.savePlayerScore(session.Player2.UserID, session.Player2.Score, "Player2")
 		if err != nil {
-			log.Printf("[SessionManager] Failed to save Player2 score to results: %v", err)
-		} else {
-			log.Printf("[SessionManager] Successfully saved Player2 (%s) score: %d", session.Player2.UserID, session.Player2.Score)
+			log.Printf("[SessionManager] Failed to save Player2 score: %v", err)
 		}
 	}
+}
+
+// savePlayerScore は個別のプレイヤーのスコアを保存します（result_handlerのロジックを使用）
+func (sm *SessionManager) savePlayerScore(userID string, score int, playerName string) error {
+	// result_handlerと同じバリデーション
+	if userID == "" {
+		return fmt.Errorf("user_idは必須です")
+	}
+	if score < 0 {
+		return fmt.Errorf("スコアは0以上である必要があります")
+	}
+
+	// resultsテーブルに保存
+	result, err := sm.resultRepo.CreateResult(nil, userID, score)
+	if err != nil {
+		log.Printf("[SessionManager] Failed to save %s (%s) score to results: %v", playerName, userID, err)
+		return fmt.Errorf("スコア保存に失敗しました: %w", err)
+	}
+
+	log.Printf("[SessionManager] Successfully saved %s (%s) score: %d (result ID: %d)", 
+		playerName, userID, score, result.ID)
+	return nil
 }
 
 // JoinRoomByPasscode は合言葉を使ってルームに参加します。
