@@ -64,6 +64,7 @@ func main() {
 	deckGetHandler := api.NewDeckGetHandler(deckService) // デッキ取得ハンドラの初期化
 	gameHandler := api.NewGameHandler(sessionManager, databaseService) // ゲームハンドラの初期化
 	resultHandler := api.NewResultHandler(resultRepo) // ゲーム結果ハンドラの初期化
+	publicHandler := api.NewPublicHandler(databaseService) // 公開ハンドラの初期化
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
@@ -76,7 +77,8 @@ func main() {
 	})
 
 	// 認証不要な公開エンドポイント
-	r.HandleFunc("/api/public", api.PublicHandler).Methods("GET")
+	r.HandleFunc("/api/public", api.PublicHandlerFunc).Methods("GET")
+	r.HandleFunc("/api/user/{userID}/display-name", publicHandler.GetUserDisplayNameHandler).Methods("GET", "OPTIONS")
 
 	// データベースから保存済みのGitHub Contributionデータを取得するエンドポイント
 	// GET /api/contributions/{userID}

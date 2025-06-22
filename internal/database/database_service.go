@@ -199,4 +199,30 @@ func (s *DatabaseService) GetDeckByID(deckID string) (*models.Deck, error) {
 	return &deck, nil
 }
 
+// GetUserDisplayNameByUserID fetches the display name (user_name) for a given user ID (UUID).
+// If the user doesn't exist or user_name is empty, returns "ゲスト".
+func (s *DatabaseService) GetUserDisplayNameByUserID(userID string) string {
+	var userName sql.NullString
+	// users テーブルから userID に紐づく user_name を取得するクエリ
+	query := `SELECT user_name FROM users WHERE id = $1`
+	err := s.DB.QueryRow(query, userID).Scan(&userName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("DatabaseService Info: ユーザーID %s が見つからないため、「ゲスト」を返します", userID)
+			return "ゲスト"
+		}
+		log.Printf("DatabaseService Error: ユーザー名の取得に失敗しました: %v, 「ゲスト」を返します", err)
+		return "ゲスト"
+	}
+	
+	// user_nameがNULLまたは空文字列の場合も「ゲスト」を返す
+	if !userName.Valid || userName.String == "" {
+		log.Printf("DatabaseService Info: ユーザーID %s のuser_nameが空のため、「ゲスト」を返します", userID)
+		return "ゲスト"
+	}
+	
+	log.Printf("DatabaseService Info: ユーザーID %s に対応するユーザー名 '%s' を取得しました", userID, userName.String)
+	return userName.String
+}
+
 
