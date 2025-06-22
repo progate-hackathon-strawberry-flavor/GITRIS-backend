@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -149,8 +151,9 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 		log.Printf("[GameHandler] Received message: %s", string(message))
 		
 		var authMsg struct {
-			Type  string `json:"type"`
-			Token string `json:"token"`
+			Type   string `json:"type"`
+			Token  string `json:"token"`
+			UserID string `json:"user_id"`
 		}
 		
 		if err := json.Unmarshal(message, &authMsg); err != nil {
@@ -202,6 +205,7 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 					userID = uuid.New().String()
 					log.Printf("[GameHandler] No session found, generated test user ID: %s", userID)
 				}
+
 			} else {
 				// JWT Secretを取得
 				jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
@@ -362,6 +366,41 @@ func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request)
 		"message":        message,
 		"session_id":     sessionID,
 		"is_new_session": isNewSession,
+		"user_id":        userID, // UserIDをレスポンスに含める
+	})
+}
+
+// DeleteSession は指定された合言葉のセッションを削除するハンドラーです。
+func (h *GameHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[GameHandler] DeleteSession called")
+	
+	vars := mux.Vars(r)
+	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
+	if passcode == "" {
+		WriteErrorResponse(w, http.StatusBadRequest, "合言葉が必要です")
+		return
+	}
+	log.Printf("[GameHandler] Deleting session with passcode: %s", passcode)
+
+	// セッションの存在を確認
+	_, exists := h.sessionManager.GetGameSession(passcode)
+	if !exists {
+		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは見つかりませんでした")
+		return
+	}
+
+	// セッションを削除
+	err := h.sessionManager.DeleteSession(passcode)
+	if err != nil {
+		log.Printf("[GameHandler] Failed to delete session %s: %v", passcode, err)
+		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("セッションの削除に失敗しました: %v", err))
+		return
+	}
+
+	log.Printf("[GameHandler] Successfully deleted session: %s", passcode)
+	WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("セッション「%s」を削除しました", passcode),
 	})
 }
 

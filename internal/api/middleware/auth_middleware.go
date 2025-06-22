@@ -2,11 +2,14 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -39,6 +42,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
+
 
 		// 1. authorizationヘッダーからJWTを取得
 		authHeader := r.Header.Get("Authorization")
