@@ -1,6 +1,9 @@
 # GITRIS-backend
 GitHub * TETRIS
 
+## 使用技術
+<img src="https://go-skill-icons.vercel.app/api/icons?i=go,websocket,github,graphql,render" alt="Icons representing technologies: TypeScript, Hono, React, Dart, Flutter, Discord, GitHub, Supabase, and Vercel" />
+
 ## 環境変数設定
 
 以下の環境変数を設定してください：
