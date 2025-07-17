@@ -21,7 +21,7 @@ type Piece struct {
 	X        int       `json:"x"`         // ボード上のX座標
 	Y        int       `json:"y"`         // ボード上のY座標
 	Rotation int       `json:"rotation"`  // 回転角度 (0, 90, 180, 270 度)
-	ScoreData map[string]int `json:"-"`  // 各ブロックのスコア情報 "relativeX_relativeY": score - JSONシリアライズから除外
+	ScoreData map[string]int `json:"score_data,omitempty"`  // 各ブロックのスコア情報 "relativeX_relativeY": score
 	// TODO: GITRISのデッキシステムを考慮すると、ピース内の各ブロックに
 	// Contributionスコアや元々のGitHub草の座標を紐付ける必要があるかもしれません。
 	// 現状では Board.ClearLines で仮のスコアを使用していますが、

@@ -93,35 +93,33 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 		// ハードドロップ後はピースを即座に固定
 		state.Board.MergePiece(state.CurrentPiece)
 		handlePieceLock(state)
-	case "rotate_right", "rotate":
-		// 右回転（Oピースは回転しない）
-		if state.CurrentPiece.Type == tetris.TypeO {
-			// Oピースは回転しない
-			moved = false
+	case "rotate", "rotate_right", "rotate_clockwise":
+		// 時計回りに90度回転
+		originalPiece := state.CurrentPiece.Clone() // 元のピースの状態を保存
+		state.CurrentPiece.Rotate()
+		
+		// 回転後の衝突判定
+		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+			// 回転できない場合は元に戻す
+			*state.CurrentPiece = *originalPiece
 		} else {
-			oldRotation := state.CurrentPiece.Rotation
-			state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation + 90) % 360
-			if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-				// 衝突する場合は回転を元に戻す
-				state.CurrentPiece.Rotation = oldRotation
-			} else {
-				moved = true
-			}
+			// 回転が成功した場合、現在のピースのスコア情報を更新
+			state.updateCurrentPieceScores()
+			moved = true
 		}
-	case "rotate_left":
-		// 左回転（Oピースは回転しない）
-		if state.CurrentPiece.Type == tetris.TypeO {
-			// Oピースは回転しない
-			moved = false
+	case "rotate_left", "rotate_counterclockwise":
+		// 反時計回りに90度回転
+		originalPiece := state.CurrentPiece.Clone() // 元のピースの状態を保存
+		state.CurrentPiece.RotateCounterClockwise()
+		
+		// 回転後の衝突判定
+		if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
+			// 回転できない場合は元に戻す
+			*state.CurrentPiece = *originalPiece
 		} else {
-			oldRotation := state.CurrentPiece.Rotation
-			state.CurrentPiece.Rotation = (state.CurrentPiece.Rotation - 90 + 360) % 360 // 負の値を回避
-			if state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-				// 衝突する場合は回転を元に戻す
-				state.CurrentPiece.Rotation = oldRotation
-			} else {
-				moved = true
-			}
+			// 回転が成功した場合、現在のピースのスコア情報を更新
+			state.updateCurrentPieceScores()
+			moved = true
 		}
 	case "hold":
 		// ホールド機能（今回が既に使用済みでなければ実行）
@@ -269,12 +267,19 @@ func handlePieceLock(state *PlayerGameState) {
 func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Piece) {
 	// 早期リターンでパフォーマンス向上
 	if piece == nil || piece.ScoreData == nil || len(piece.ScoreData) == 0 {
+		log.Printf("[updateContributionScoresFromPiece] ピースまたはスコアデータがありません - piece: %v", piece != nil)
 		return
 	}
 
+	log.Printf("[updateContributionScoresFromPiece] ピース配置開始 - type: %d, position: (%d,%d), rotation: %d", 
+		piece.Type, piece.X, piece.Y, piece.Rotation)
+	log.Printf("[updateContributionScoresFromPiece] ピースのスコアデータ: %v", piece.ScoreData)
+
 	// ピースの各ブロックについて、ボード上の位置にスコアを設定（最適化版）
 	blocks := piece.Blocks() // 一度だけ取得
-	for _, block := range blocks {
+	log.Printf("[updateContributionScoresFromPiece] ピースのブロック座標: %v", blocks)
+	
+	for blockIndex, block := range blocks {
 		boardX := piece.X + block[0]
 		boardY := piece.Y + block[1]
 
@@ -282,14 +287,41 @@ func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Pie
 		if boardX >= 0 && boardX < tetris.BoardWidth && boardY >= 0 && boardY < tetris.BoardHeight {
 			// 文字列作成の最適化: strconv使用でfmt.Sprintfより高速
 			scoreKey := strconv.Itoa(boardY) + "_" + strconv.Itoa(boardX)
-			rotationKey := "rot_" + strconv.Itoa(piece.Rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1])
 			
-			// スコア存在チェックを効率化
-			if score, exists := piece.ScoreData[rotationKey]; exists && score > 0 {
-				state.ContributionScores[scoreKey] = score
+			// 複数のキー形式でスコアを検索
+			possibleKeys := []string{
+				"rot_" + strconv.Itoa(piece.Rotation) + "_" + strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1]), // rot_回転_相対X_相対Y
+				strconv.Itoa(block[0]) + "_" + strconv.Itoa(block[1]), // 相対X_相対Y
+				strconv.Itoa(blockIndex), // ブロックインデックス
 			}
+			
+			var score int
+			var foundKey string
+			found := false
+			
+			for _, key := range possibleKeys {
+				if val, exists := piece.ScoreData[key]; exists && val > 0 {
+					score = val
+					foundKey = key
+					found = true
+					break
+				}
+			}
+			
+			if found {
+				state.ContributionScores[scoreKey] = score
+				log.Printf("[updateContributionScoresFromPiece] スコア設定成功: ボード位置[%d,%d] = %d (キー: %s → %s)", 
+					boardY, boardX, score, foundKey, scoreKey)
+			} else {
+				log.Printf("[updateContributionScoresFromPiece] スコアが見つからない: ボード位置[%d,%d], 試したキー: %v", 
+					boardY, boardX, possibleKeys)
+			}
+		} else {
+			log.Printf("[updateContributionScoresFromPiece] ボード範囲外: ボード位置[%d,%d]", boardY, boardX)
 		}
 	}
+	
+	log.Printf("[updateContributionScoresFromPiece] 処理完了。ContributionScoresの総数: %d", len(state.ContributionScores))
 }
 
 // CalculateScore はラインクリア数、レベル、コンボなどに基づいて追加スコアを計算します。

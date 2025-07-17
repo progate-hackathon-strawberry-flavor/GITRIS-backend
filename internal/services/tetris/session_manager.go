@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket" // WebSocketライブラリのインポート
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database" // データベースサービスをインポート
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models/tetris"
 )
 
@@ -951,12 +952,20 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 		// セッションが存在しない場合、新しく作成（プレイヤー1として）
 		log.Printf("[SessionManager] Creating new session for passcode: %s", passcode)
 		
+			// ゲストユーザーの場合はnilデッキを設定
+	var playerDeck *models.Deck
+	if playerDeckID == "guest" || playerDeckID == "" {
+		log.Printf("[SessionManager] Guest user detected (deck_id: %s), setting deck to nil for guest deck generation", playerDeckID)
+		playerDeck = nil
+	} else {
 		// データベースからプレイヤーのデッキデータをロード
-		playerDeck, err := sm.dbService.GetDeckByID(playerDeckID)
+		var err error
+		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
 		if err != nil {
 			log.Printf("[SessionManager] Failed to get player deck %s: %v", playerDeckID, err)
 			return "", false, fmt.Errorf("failed to get player deck: %w", err)
 		}
+	}
 		
 		// 新しいゲームセッションを初期化（IDは合言葉を使用）
 		newSession, err := NewGameSession(passcode, playerID, playerDeck, sm.deckRepo)
@@ -993,14 +1002,22 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true: Same user join allowed for testing")
 		}
 
-		log.Printf("[SessionManager] Adding player2 to existing session: %s", passcode)
-		
+			log.Printf("[SessionManager] Adding player2 to existing session: %s", passcode)
+	
+	// ゲストユーザーの場合はnilデッキを設定
+	var playerDeck *models.Deck
+	if playerDeckID == "guest" || playerDeckID == "" {
+		log.Printf("[SessionManager] Guest user detected for player2 (deck_id: %s), setting deck to nil for guest deck generation", playerDeckID)
+		playerDeck = nil
+	} else {
 		// データベースからプレイヤー2のデッキデータをロード
-		playerDeck, err := sm.dbService.GetDeckByID(playerDeckID)
+		var err error
+		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
 		if err != nil {
 			log.Printf("[SessionManager] Failed to get player2 deck %s: %v", playerDeckID, err)
 			return "", false, fmt.Errorf("failed to get player2 deck: %w", err)
 		}
+	}
 
 		session.SetPlayer2(playerID, playerDeck, sm.deckRepo)
 		log.Printf("[SessionManager] Player %s joined session %s successfully", playerID, passcode)
