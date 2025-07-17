@@ -3,7 +3,6 @@ package tetris
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -182,9 +181,9 @@ func (s *PlayerGameState) buildContributionScoresFromDeck() {
 	// デッキ配置データから個別ブロックのスコアを設定
 	// 配置されたブロックが元のピースのブロックごとスコアを保持するよう改善
 	for _, deckPiece := range s.DeckPlacements {
-		log.Printf("[buildContributionScoresFromDeck] Processing piece type %d with %d blocks", deckPiece.Type, len(deckPiece.Blocks))
+
 		
-		for blockIndex, block := range deckPiece.Blocks {
+		for _, block := range deckPiece.Blocks {
 			// デッキ配置のx,y座標をボード座標に変換
 			// 現在は単純にx,yをそのまま使用（後で調整が必要）
 			if block.X >= 0 && block.X < tetris.BoardWidth && 
@@ -192,13 +191,12 @@ func (s *PlayerGameState) buildContributionScoresFromDeck() {
 				scoreKey := strconv.Itoa(block.Y) + "_" + strconv.Itoa(block.X)
 				s.ContributionScores[scoreKey] = block.Score
 				
-				log.Printf("[buildContributionScoresFromDeck] Set score for pos (%d,%d): %d (piece %d, block %d)", 
-					block.X, block.Y, block.Score, deckPiece.Type, blockIndex)
+
 			}
 		}
 	}
 	
-	log.Printf("[buildContributionScoresFromDeck] Total contribution scores set: %d", len(s.ContributionScores))
+
 }
 
 // generatePieceQueue はテトリスで一般的な7-bagシステムに基づきピースキューを生成します。
@@ -228,12 +226,11 @@ func (s *PlayerGameState) generatePieceQueue() {
 		swapIndex := s.randGenerator.Intn(len(bag)-1) + 1
 		bag[0], bag[swapIndex] = bag[swapIndex], bag[0]
 		
-		log.Printf("[PieceQueue] 連続防止: 前のピース %d と重複していたため、位置 %d と交換しました", lastPieceType, swapIndex)
+
 	}
 	
 	s.pieceQueue = append(s.pieceQueue, bag...)
 	// ログ出力を削減（パフォーマンス改善） - 重要なイベントのみ残す
-	// log.Printf("[PieceQueue] 新しいバッグを生成: %v (キュー長: %d)", bag, len(s.pieceQueue))
 }
 
 // GetNextPieceFromQueue は7-bagシステムからピースを取得します。
@@ -271,7 +268,7 @@ func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
 		
 		if selectedPiece != nil {
 			// デッキ配置データからスコア情報を設定 - すべての回転状態に対応
-			log.Printf("[GetNextPieceFromQueue] Setting consistent score data for piece %d (always using first variant)", piece.Type)
+
 			
 			// すべての回転状態（0, 90, 180, 270度）でのスコアマッピングを作成
 			for rotation := 0; rotation < 4; rotation++ {
@@ -295,7 +292,7 @@ func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
 					if rotation == 0 { // 初期回転状態のキーをメインとして使用
 						relativeKey := fmt.Sprintf("%d_%d", relativeX, relativeY)
 						piece.ScoreData[relativeKey] = score
-						log.Printf("[GetNextPieceFromQueue] Main key: %s = %d", relativeKey, score)
+
 					}
 					
 					// 2. 回転状態別のキー（内部使用・デバッグ用）
@@ -310,8 +307,7 @@ func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
 				}
 			}
 			
-			log.Printf("[GetNextPieceFromQueue] Set consistent score data for piece %d with %d entries", 
-				piece.Type, len(piece.ScoreData))
+
 		}
 	}
 
@@ -327,7 +323,7 @@ func (s *PlayerGameState) GetNextPieceFromQueue() *tetris.Piece {
 			relativeKey := fmt.Sprintf("%d_%d", block[0], block[1])
 			piece.ScoreData[relativeKey] = 100
 		}
-		log.Printf("[GetNextPieceFromQueue] Set default score data for piece %d with relative coordinate keys", piece.Type)
+
 	}
 
 	return piece
@@ -356,7 +352,6 @@ func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tet
 
 	// 指定されたピースタイプのデッキデータが見つからない場合
 	if selectedDeckPiece == nil {
-		log.Printf("[PieceQueue] デッキデータに %d タイプのピースが見つかりません、デフォルトスコアを使用", pieceType)
 		return nil
 	}
 
@@ -383,14 +378,9 @@ func (s *PlayerGameState) getPieceScoreFromDeck(pieceType tetris.PieceType) *tet
 				score = 100 // デフォルトスコア
 			}
 			piece.ScoreData[key] = score
-			
-			// デバッグログ: テトリミノのスコアデータ設定を確認
-			log.Printf("[DEBUG] Piece %d, Rotation %d, Block %d at (%d,%d) -> key: %s, score: %d", 
-				pieceType, rotationDegrees, i, block[0], block[1], key, score)
 		}
 	}
 
-	log.Printf("[PieceQueue] デッキから %d タイプのピースにスコア情報を設定しました (総キー数: %d)", pieceType, len(piece.ScoreData))
 	return piece
 }
 
@@ -433,14 +423,8 @@ func (s *PlayerGameState) getNextPieceFromDeck() *tetris.Piece {
 			relativeKey := fmt.Sprintf("%d_%d", relativeX, relativeY) // 相対座標キー追加
 			piece.ScoreData[rotationKey] = block.Score
 			piece.ScoreData[relativeKey] = block.Score
-			
-			log.Printf("[getNextPieceFromDeck] Set score for piece %d, block %d: %d (keys: %s, %s, %s)", 
-				piece.Type, blockIndex, block.Score, blockIndexKey, rotationKey, relativeKey)
 		}
 	}
-
-	log.Printf("[getNextPieceFromDeck] Generated piece %d with %d score entries: %v", 
-		piece.Type, len(piece.ScoreData), piece.ScoreData)
 	return piece
 }
 
@@ -557,14 +541,12 @@ type GameStateEvent struct {
 func NewGameSession(roomID, player1ID string, player1Deck *models.Deck, deckRepo database.DeckRepository) (*GameSession, error) {
 	// プレイヤー1のデッキが存在しない場合（ゲストユーザー）はデフォルトデッキを生成
 	if player1Deck == nil {
-		log.Printf("Player1 %s has no deck, creating guest deck", player1ID)
 		guestDeckData := models.CreateGuestDeck(player1ID)
 		player1Deck = guestDeckData.Deck
 		
 		// デッキ配置データを使用してゲーム状態を作成
 		player1State, err := createPlayerStateWithGuestDeck(player1ID, guestDeckData)
 		if err != nil {
-			log.Printf("Failed to create player1 state with guest deck: %v, falling back to random scores", err)
 			player1State = NewPlayerGameState(player1ID, player1Deck)
 		}
 		
@@ -583,7 +565,6 @@ func NewGameSession(roomID, player1ID string, player1Deck *models.Deck, deckRepo
 	player1State, err := NewPlayerGameStateWithDeckPlacements(player1ID, player1Deck, deckRepo)
 	if err != nil {
 		// エラーが発生した場合は従来の方法でフォールバック
-		log.Printf("Failed to create player1 state with deck placements: %v, falling back to random scores", err)
 		player1State = NewPlayerGameState(player1ID, player1Deck)
 	}
 
@@ -607,14 +588,12 @@ func NewGameSession(roomID, player1ID string, player1Deck *models.Deck, deckRepo
 func (gs *GameSession) SetPlayer2(player2ID string, player2Deck *models.Deck, deckRepo database.DeckRepository) {
 	// プレイヤー2のデッキが存在しない場合（ゲストユーザー）はデフォルトデッキを生成
 	if player2Deck == nil {
-		log.Printf("Player2 %s has no deck, creating guest deck", player2ID)
 		guestDeckData := models.CreateGuestDeck(player2ID)
 		player2Deck = guestDeckData.Deck
 		
 		// デッキ配置データを使用してゲーム状態を作成
 		player2State, err := createPlayerStateWithGuestDeck(player2ID, guestDeckData)
 		if err != nil {
-			log.Printf("Failed to create player2 state with guest deck: %v, falling back to random scores", err)
 			player2State = NewPlayerGameState(player2ID, player2Deck)
 		}
 		gs.Player2 = player2State
@@ -625,7 +604,6 @@ func (gs *GameSession) SetPlayer2(player2ID string, player2Deck *models.Deck, de
 	player2State, err := NewPlayerGameStateWithDeckPlacements(player2ID, player2Deck, deckRepo)
 	if err != nil {
 		// エラーが発生した場合は従来の方法でフォールバック
-		log.Printf("Failed to create player2 state with deck placements: %v, falling back to random scores", err)
 		player2State = NewPlayerGameState(player2ID, player2Deck)
 	}
 	gs.Player2 = player2State
@@ -789,17 +767,15 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 			found := false
 			
 			// 1. ピースのScoreDataからブロックインデックスベースで取得（最も確実）
-			if s.CurrentPiece.ScoreData != nil && len(s.CurrentPiece.ScoreData) > 0 {
+			if len(s.CurrentPiece.ScoreData) > 0 {
 				if pieceScore, exists := s.CurrentPiece.ScoreData[blockIndexKey]; exists {
 					score = pieceScore
 					found = true
-					log.Printf("[updateCurrentPieceScores] Piece %d, Block %d at (%d,%d): score = %d from ScoreData (index key)", 
-						s.CurrentPiece.Type, blockIndex, boardX, boardY, score)
 				}
 			}
 			
 			// 2. フォールバック: 回転状態別キーで取得
-			if !found && s.CurrentPiece.ScoreData != nil && len(s.CurrentPiece.ScoreData) > 0 {
+			if !found && len(s.CurrentPiece.ScoreData) > 0 {
 				relativeX := block[0]
 				relativeY := block[1]
 				rotationKey := "rot_" + strconv.Itoa(s.CurrentPiece.Rotation) + "_" + strconv.Itoa(relativeX) + "_" + strconv.Itoa(relativeY)
@@ -807,8 +783,6 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 				if pieceScore, exists := s.CurrentPiece.ScoreData[rotationKey]; exists {
 					score = pieceScore
 					found = true
-					log.Printf("[updateCurrentPieceScores] Piece %d, Block %d at (%d,%d): score = %d from ScoreData (rotation key)", 
-						s.CurrentPiece.Type, blockIndex, boardX, boardY, score)
 				}
 			}
 			
@@ -819,8 +793,6 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 						if blockIndex < len(deckPiece.Blocks) {
 							score = deckPiece.Blocks[blockIndex].Score
 							found = true
-							log.Printf("[updateCurrentPieceScores] Piece %d, Block %d at (%d,%d): score = %d from deck", 
-								s.CurrentPiece.Type, blockIndex, boardX, boardY, score)
 						}
 						break
 					}
@@ -828,8 +800,6 @@ func (s *PlayerGameState) updateCurrentPieceScores() {
 			}
 			
 			if !found {
-				log.Printf("[updateCurrentPieceScores] Piece %d, Block %d at (%d,%d): using default score %d", 
-					s.CurrentPiece.Type, blockIndex, boardX, boardY, score)
 			}
 			
 			// ブロックインデックスベースのキーを優先的に設定

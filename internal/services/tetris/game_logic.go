@@ -1,7 +1,6 @@
 package tetris
 
 import (
-	"log"
 	"strconv"
 	"time"
 
@@ -55,7 +54,6 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 	}
 
 	if state.CurrentPiece == nil {
-		log.Printf("[ERROR] CurrentPiece is nil for user %s during action %s", state.UserID, action)
 		return false
 	}
 
@@ -146,7 +144,6 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 			
 			// 安全性チェック
 			if state.CurrentPiece == nil {
-				log.Printf("[ERROR] HeldPiece is nil during hold swap for user %s", state.UserID)
 				state.CurrentPiece = state.GetNextPieceFromQueue()
 				state.NextPiece = state.GetNextPieceFromQueue()
 			} else {
@@ -164,7 +161,6 @@ func ApplyPlayerInput(state *PlayerGameState, action string) bool {
 
 		// ホールド後のピースが衝突する場合はゲームオーバー
 		if state.CurrentPiece != nil && state.Board.HasCollision(state.CurrentPiece, 0, 0) {
-			log.Printf("[INFO] Game over after hold for user %s - piece collision", state.UserID)
 			state.IsGameOver = true
 		}
 	}
@@ -253,7 +249,6 @@ func handlePieceLock(state *PlayerGameState) {
 
 	// 新しいピースがスポーン位置で既に衝突（ボードの最上部が埋まっている）したらゲームオーバー
 	if state.IsGameOver {
-		log.Printf("Player %s Game Over! Final Score: %d, Lines Cleared: %d", state.UserID, state.Score, state.LinesCleared)
 		// TODO: GameSessionManager にゲームオーバーを通知し、セッションを終了する
 		// 例: sessionManager.EndGameSession(state.RoomID)
 	}
@@ -267,17 +262,11 @@ func handlePieceLock(state *PlayerGameState) {
 func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Piece) {
 	// 早期リターンでパフォーマンス向上
 	if piece == nil || piece.ScoreData == nil || len(piece.ScoreData) == 0 {
-		log.Printf("[updateContributionScoresFromPiece] ピースまたはスコアデータがありません - piece: %v", piece != nil)
 		return
 	}
 
-	log.Printf("[updateContributionScoresFromPiece] ピース配置開始 - type: %d, position: (%d,%d), rotation: %d", 
-		piece.Type, piece.X, piece.Y, piece.Rotation)
-	log.Printf("[updateContributionScoresFromPiece] ピースのスコアデータ: %v", piece.ScoreData)
-
 	// ピースの各ブロックについて、ボード上の位置にスコアを設定（最適化版）
 	blocks := piece.Blocks() // 一度だけ取得
-	log.Printf("[updateContributionScoresFromPiece] ピースのブロック座標: %v", blocks)
 	
 	for blockIndex, block := range blocks {
 		boardX := piece.X + block[0]
@@ -296,13 +285,12 @@ func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Pie
 			}
 			
 			var score int
-			var foundKey string
+
 			found := false
 			
 			for _, key := range possibleKeys {
 				if val, exists := piece.ScoreData[key]; exists && val > 0 {
 					score = val
-					foundKey = key
 					found = true
 					break
 				}
@@ -310,18 +298,11 @@ func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Pie
 			
 			if found {
 				state.ContributionScores[scoreKey] = score
-				log.Printf("[updateContributionScoresFromPiece] スコア設定成功: ボード位置[%d,%d] = %d (キー: %s → %s)", 
-					boardY, boardX, score, foundKey, scoreKey)
-			} else {
-				log.Printf("[updateContributionScoresFromPiece] スコアが見つからない: ボード位置[%d,%d], 試したキー: %v", 
-					boardY, boardX, possibleKeys)
 			}
 		} else {
-			log.Printf("[updateContributionScoresFromPiece] ボード範囲外: ボード位置[%d,%d]", boardY, boardX)
 		}
 	}
 	
-	log.Printf("[updateContributionScoresFromPiece] 処理完了。ContributionScoresの総数: %d", len(state.ContributionScores))
 }
 
 // CalculateScore はラインクリア数、レベル、コンボなどに基づいて追加スコアを計算します。

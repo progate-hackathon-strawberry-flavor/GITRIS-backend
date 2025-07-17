@@ -60,7 +60,6 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 			return fmt.Errorf("新しいデッキの作成に失敗しました: %w", err)
 		}
 		deckID = newDeck.ID
-		log.Printf("ユーザー %s の新しいデッキが作成されました: %s", userID, deckID)
 	} else {
 		deckID = deck.ID
 	}
@@ -70,14 +69,12 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 	if err != nil {
 		return fmt.Errorf("既存のテトリミノ配置の削除に失敗しました: %w", err)
 	}
-	log.Printf("デッキ %s の既存のテトリミノ配置が削除されました。", deckID)
 
 	// 受け取ったtetriminos配列の各要素をtetrimino_placementsテーブルに新規レコードとして挿入します
 	err = s.deckRepo.BulkInsertTetriminoPlacements(tx, deckID, tetriminos)
 	if err != nil {
 		return fmt.Errorf("テトリミノ配置の挿入に失敗しました: %w", err)
 	}
-	log.Printf("デッキ %s に %d 個のテトリミノ配置が挿入されました。", deckID, len(tetriminos))
 
 	// decksテーブルのtotal_scoreを更新します
 	newTotalScore := 0
@@ -88,7 +85,6 @@ func (s *deckServiceImpl) SaveDeck(userID string, tetriminos []models.TetriminoP
 	if err != nil {
 		return fmt.Errorf("デッキの合計スコアの更新に失敗しました: %w", err)
 	}
-	log.Printf("デッキ %s のtotal_scoreが %d に更新されました。", deckID, newTotalScore)
 
 	// トランザクションをコミットします
 	err = tx.Commit()

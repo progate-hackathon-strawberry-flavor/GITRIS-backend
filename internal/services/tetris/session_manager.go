@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -142,7 +141,6 @@ func (sm *SessionManager) Run() {
 			sm.mu.Lock()
 			sm.clients[client.UserID] = client
 			sm.mu.Unlock()
-			log.Printf("[SessionManager] Client registered: %s (Passcode: %s)", client.UserID, client.RoomID)
 
 			// クライアント登録後に最新の状態をブロードキャスト（非同期実行）
 			go func(passcode string) {
@@ -164,12 +162,9 @@ func (sm *SessionManager) Run() {
 					// Sendチャネルを安全に閉じる
 					registeredClient.SafeClose()
 					delete(sm.clients, client.UserID)
-					log.Printf("[SessionManager] Client unregistered: %s (Passcode: %s)", client.UserID, client.RoomID)
 				} else {
-					log.Printf("[SessionManager] Skipped unregister for user %s (different client instance)", client.UserID)
 				}
 			} else {
-				log.Printf("[SessionManager] Attempted to unregister non-existent client: %s", client.UserID)
 			}
 			sm.mu.Unlock()
 
@@ -178,11 +173,9 @@ func (sm *SessionManager) Run() {
 			session, ok := sm.sessions[client.RoomID]
 			sm.mu.RUnlock()
 			if ok && session.Status == "playing" {
-				log.Printf("[SessionManager] Player %s left passcode %s during game. Ending session.", client.UserID, client.RoomID)
 				sm.EndGameSession(client.RoomID)
 			} else if ok {
 				// ゲーム中でない場合は、セッション状態を更新してブロードキャスト
-				log.Printf("[SessionManager] Player %s left passcode %s (status: %s)", client.UserID, client.RoomID, session.Status)
 				sm.BroadcastGameState(client.RoomID)
 			}
 
@@ -194,7 +187,6 @@ func (sm *SessionManager) Run() {
 			sm.mu.RUnlock()
 			
 			if !clientExists {
-				log.Printf("[SessionManager] Received input from unregistered user %s", event.UserID)
 				continue
 			}
 			
@@ -203,7 +195,6 @@ func (sm *SessionManager) Run() {
 			sm.mu.RUnlock()
 
 			if !ok || session.Status != "playing" {
-				log.Printf("[SessionManager] Received input for non-existent or non-playing passcode %s from user %s", client.RoomID, event.UserID)
 				continue // 存在しないか、プレイ中でない合言葉への入力は無視
 			}
 
@@ -214,13 +205,11 @@ func (sm *SessionManager) Run() {
 			} else if session.Player2 != nil && session.Player2.UserID == event.UserID {
 				targetPlayerState = session.Player2
 			} else {
-				log.Printf("[SessionManager] Input from unknown user %s in passcode %s", event.UserID, client.RoomID)
 				continue
 			}
 
 			// ゲームオーバーしたプレイヤーの操作は無視
 			if targetPlayerState.IsGameOver {
-				log.Printf("[SessionManager] Ignoring input from game over player %s", event.UserID)
 				continue
 			}
 
@@ -240,7 +229,6 @@ func (sm *SessionManager) Run() {
 					go func(passcode string) {
 						sm.BroadcastGameState(passcode)
 					}(session.ID)
-					log.Printf("[SessionManager] Player %s is game over, but game continues for the other player", event.UserID)
 				}
 			}
 
@@ -259,7 +247,6 @@ func (sm *SessionManager) Run() {
 			for _, session := range activeSessions {
 				// 時間制限チェック（100秒）
 				if session.IsTimeUp() {
-					log.Printf("[SessionManager] Time limit reached for passcode %s, ending game", session.ID)
 					sm.EndGameSession(session.ID)
 					continue // 時間切れのセッションは処理をスキップ
 				}
@@ -282,7 +269,6 @@ func (sm *SessionManager) Run() {
 				if session.Player1 != nil && session.Player2 != nil && 
 				   session.Player1.IsGameOver && session.Player2.IsGameOver {
 					// 両プレイヤーがゲームオーバーした場合のみセッション終了
-					log.Printf("[SessionManager] Both players are game over, ending session %s", session.ID)
 					go func(sessionID string) {
 						time.Sleep(2 * time.Second)
 						sm.EndGameSession(sessionID)
@@ -296,7 +282,6 @@ func (sm *SessionManager) Run() {
 			session, ok := sm.sessions[event.RoomID]
 			if !ok {
 				sm.mu.RUnlock()
-				log.Printf("[SessionManager] Attempted to broadcast for non-existent room: %s", event.RoomID)
 				continue
 			}
 
@@ -304,7 +289,6 @@ func (sm *SessionManager) Run() {
 			lightweightState := session.ToLightweight()
 			stateJSON, err := json.Marshal(lightweightState)
 			if err != nil {
-				log.Printf("[SessionManager] Error marshaling lightweight game state for room %s: %v", event.RoomID, err)
 				sm.mu.RUnlock()
 				continue
 			}
@@ -314,7 +298,6 @@ func (sm *SessionManager) Run() {
 				if client.RoomID == event.RoomID {
 					// 安全な送信メソッドを使用
 					if !client.SafeSend(stateJSON) {
-						log.Printf("[SessionManager] Failed to send to client %s (channel closed or full)", client.UserID)
 					}
 				}
 			}
@@ -322,7 +305,6 @@ func (sm *SessionManager) Run() {
 		
 		case <-sm.quit:
 			// シャットダウンシグナルを受信したらメインループを終了
-			log.Printf("[SessionManager] シャットダウンシグナルを受信、メインループを終了します")
 			return
 		}
 	}
@@ -333,79 +315,60 @@ func (sm *SessionManager) Run() {
 // Parameters:
 //   passcode : チェックする合言葉
 func (sm *SessionManager) CheckAndStartGame(passcode string) {
-	log.Printf("[SessionManager] CheckAndStartGame called for passcode: %s", passcode)
 	
 	sm.mu.Lock()
 	defer sm.mu.Unlock() // defer で必ずアンロックされるように変更
 
-	// デバッグ用: 現在のセッション一覧をログ出力
-	sessionCount := len(sm.sessions)
-	log.Printf("[SessionManager] Current session count: %d", sessionCount)
+
 	
 	session, ok := sm.sessions[passcode]
 	if !ok {
-		log.Printf("[SessionManager] Passcode %s not found in CheckAndStartGame (total sessions: %d)", passcode, sessionCount)
 		// デバッグ用: 存在するセッションパスコードをログ出力
 		var existingPasscodes []string
 		for code := range sm.sessions {
 			existingPasscodes = append(existingPasscodes, code)
 		}
-		log.Printf("[SessionManager] Existing passcodes: %v", existingPasscodes)
 		return // セッションが存在しない
 	}
 	
 	// セッションの状態をチェック（削除された可能性を考慮）
 	if session == nil {
-		log.Printf("[SessionManager] Session for passcode %s is nil", passcode)
 		return
 	}
 	
-	log.Printf("[SessionManager] Passcode %s status: %s", passcode, session.Status)
 	
 	// 各条件をチェック
 	hasPlayer1 := session.Player1 != nil
 	hasPlayer2 := session.Player2 != nil
 	
-	log.Printf("[SessionManager] Passcode %s - hasPlayer1: %v, hasPlayer2: %v", passcode, hasPlayer1, hasPlayer2)
 	
 	if hasPlayer1 {
-		log.Printf("[SessionManager] Passcode %s - Player1 ID: %s", passcode, session.Player1.UserID)
 	}
 	if hasPlayer2 {
-		log.Printf("[SessionManager] Passcode %s - Player2 ID: %s", passcode, session.Player2.UserID)
 	}
 	
 	// WebSocket接続をチェック
 	var player1Connected, player2Connected bool
 	if hasPlayer1 {
 		player1Connected = sm.clients[session.Player1.UserID] != nil
-		log.Printf("[SessionManager] Passcode %s - Player1 (%s) connected: %v", passcode, session.Player1.UserID, player1Connected)
 	}
 	if hasPlayer2 {
 		player2Connected = sm.clients[session.Player2.UserID] != nil
-		log.Printf("[SessionManager] Passcode %s - Player2 (%s) connected: %v", passcode, session.Player2.UserID, player2Connected)
 	}
 	
 	isWaiting := session.Status == "waiting"
-	log.Printf("[SessionManager] Passcode %s - isWaiting: %v", passcode, isWaiting)
 
 	// 2人のプレイヤーが揃っていて、両方がWebSocketに接続済みであればゲーム開始
 	if hasPlayer1 && hasPlayer2 && player1Connected && player2Connected && isWaiting {
-		log.Printf("[SessionManager] All conditions met, starting game for passcode %s", passcode)
 		
 		session.Status = "playing"
 		session.StartedAt = time.Now()
-		log.Printf("[SessionManager] Game session %s started! Players: %s vs %s", passcode, session.Player1.UserID, session.Player2.UserID)
 
 		// ゲーム開始をクライアントに通知（非同期実行）
 		go func(passcode string) {
 			sm.BroadcastGameState(passcode) 
 		}(passcode)
 		return
-	} else {
-		log.Printf("[SessionManager] Game start conditions not met for passcode %s", passcode)
-		log.Printf("[SessionManager] - hasPlayer1: %v, hasPlayer2: %v, player1Connected: %v, player2Connected: %v, isWaiting: %v", 
-			hasPlayer1, hasPlayer2, player1Connected, player2Connected, isWaiting)
 	}
 }
 
@@ -418,16 +381,13 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 // Returns:
 //   error: エラーが発生した場合
 func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocket.Conn) error {
-	log.Printf("[SessionManager] RegisterClient called for user %s with passcode %s", userID, passcode)
 
 	// 既存の接続があれば状況に応じてクリーンアップ
 	sm.mu.Lock()
 	if existingClient, exists := sm.clients[userID]; exists {
 		// 同一ユーザーの複数接続許可が有効な場合は、既存接続を保持
 		if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
-			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true - keeping existing connection for user %s", userID)
 		} else {
-			log.Printf("[SessionManager] Replacing existing connection for user %s", userID)
 			if existingClient.Conn != nil {
 				existingClient.Conn.Close()
 			}
@@ -449,15 +409,12 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 	// （既存接続は上の処理で保持されている）
 	if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
 		sm.clients[userID] = client
-		log.Printf("[SessionManager] Client %s registered for passcode %s (ALLOW_SAME_USER_JOIN enabled)", userID, passcode)
 	} else {
 		// 通常モード：既存接続がない場合のみ登録
 		if _, exists := sm.clients[userID]; !exists {
 			sm.clients[userID] = client
-			log.Printf("[SessionManager] Client %s registered for passcode %s", userID, passcode)
 		} else {
 			sm.clients[userID] = client
-			log.Printf("[SessionManager] Client %s replaced for passcode %s", userID, passcode)
 		}
 	}
 	sm.mu.Unlock()
@@ -477,7 +434,6 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 	// クライアント登録イベントを SessionManager に送信
 	sm.register <- client
 
-	log.Printf("[SessionManager] Client %s registered for passcode %s", userID, passcode)
 	return nil
 }
 
@@ -486,11 +442,9 @@ func (sm *SessionManager) readPump(client *Client) {
 	defer func() {
 		// パニック回復処理
 		if r := recover(); r != nil {
-			log.Printf("[SessionManager] Panic in readPump for user %s: %v", client.UserID, r)
 		}
 		
 		// クライアントの切断処理（unregisterのみ実行、コネクション切断はwritePumpで処理）
-		log.Printf("[SessionManager] ReadPump ending for user %s from room %s", client.UserID, client.RoomID)
 		
 		// unregister チャネルが閉じられていない場合のみ送信
 		select {
@@ -498,7 +452,6 @@ func (sm *SessionManager) readPump(client *Client) {
 			// 正常に登録解除リクエストを送信
 		default:
 			// unregisterチャネルがフルまたは閉じられている場合
-			log.Printf("[SessionManager] Could not send unregister for user %s (channel full or closed)", client.UserID)
 		}
 	}()
 
@@ -519,7 +472,6 @@ func (sm *SessionManager) readPump(client *Client) {
 	for {
 		// 接続状態チェック
 		if client.Conn == nil {
-			log.Printf("[SessionManager] WebSocket connection is nil for user %s", client.UserID)
 			break
 		}
 
@@ -528,11 +480,8 @@ func (sm *SessionManager) readPump(client *Client) {
 		if err != nil {
 			// より詳細なエラー分類とパニック防止
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
-				log.Printf("[SessionManager] WebSocket unexpected close error for user %s: %v", client.UserID, err)
 			} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
-				log.Printf("[SessionManager] WebSocket normal close for user %s: %v", client.UserID, err)
 			} else {
-				log.Printf("[SessionManager] WebSocket read error for user %s: %v", client.UserID, err)
 			}
 			// 安全に終了（コネクション切断はwritePumpに任せる）
 			return
@@ -540,18 +489,15 @@ func (sm *SessionManager) readPump(client *Client) {
 		
 		// メッセージサイズチェック
 		if len(message) == 0 {
-			log.Printf("[SessionManager] Received empty message from user %s", client.UserID)
 			continue
 		}
 		
 		// ログ出力を削減（パフォーマンス改善）
-		// log.Printf("[SessionManager] Received message from %s (Room %s): %s", client.UserID, client.RoomID, message)
 
 		// 受信したJSONメッセージを PlayerInputEvent 構造体にパース
 		var inputEvent PlayerInputEvent
 		err = json.Unmarshal(message, &inputEvent)
 		if err != nil {
-			log.Printf("[SessionManager] Failed to unmarshal input message from %s: %v, message: %s", client.UserID, err, message)
 			continue // パース失敗時はこのメッセージをスキップ
 		}
 		inputEvent.UserID = client.UserID // 受信したメッセージのUserIDを上書き（セキュリティのため）
@@ -562,7 +508,6 @@ func (sm *SessionManager) readPump(client *Client) {
 		case sm.inputEvents <- inputEvent:
 			// 正常に送信
 		default:
-			log.Printf("[SessionManager] Input events channel is full, dropping message from user %s", client.UserID)
 		}
 	}
 }
@@ -573,21 +518,17 @@ func (c *Client) writePump() {
 	defer func() {
 		// パニック回復処理
 		if r := recover(); r != nil {
-			log.Printf("[Client] Panic in writePump for user %s: %v", c.UserID, r)
 		}
 		
 		// WebSocket接続を安全に閉じる（一度だけ実行されるように）
 		if c.Conn != nil {
-			log.Printf("[Client] Closing WebSocket connection for user %s", c.UserID)
 			if err := c.Conn.Close(); err != nil {
 				// 既に閉じられている場合のエラーは無視
 				if err.Error() != "use of closed network connection" {
-					log.Printf("[Client] Error closing WebSocket connection for user %s: %v", c.UserID, err)
 				}
 			}
 			c.Conn = nil // 重複切断を防ぐ
 		}
-		log.Printf("[Client] WritePump ended for user %s", c.UserID)
 	}()
 
 	// WebSocket接続のタイムアウト設定を緩和
@@ -608,7 +549,6 @@ func (c *Client) writePump() {
 		case message, ok := <-c.Send:
 			// 接続状態チェック
 			if c.Conn == nil {
-				log.Printf("[Client] Connection is nil, terminating writePump for user %s", c.UserID)
 				return
 			}
 
@@ -626,10 +566,8 @@ func (c *Client) writePump() {
 			err := c.Conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
 				consecutiveErrors++
-				log.Printf("[Client] Error writing message for user %s (attempt %d/%d): %v", c.UserID, consecutiveErrors, maxConsecutiveErrors, err)
 				
 				if consecutiveErrors >= maxConsecutiveErrors {
-					log.Printf("[Client] Too many consecutive errors for user %s, terminating connection", c.UserID)
 					return
 				}
 				continue
@@ -641,14 +579,12 @@ func (c *Client) writePump() {
 		case <-ticker.C:
 			// 接続状態チェック
 			if c.Conn == nil {
-				log.Printf("[Client] Connection is nil during ping, terminating writePump for user %s", c.UserID)
 				return
 			}
 
 			// ピングメッセージを定期的に送信してコネクションの生存確認
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("[Client] Error sending ping for user %s: %v", c.UserID, err)
 				return
 			}
 		}
@@ -685,7 +621,6 @@ func (sm *SessionManager) BroadcastToSpecificClient(userID, passcode string) {
 
 	// 指定されたクライアントにのみ送信（安全な送信メソッドを使用）
 	if !client.SafeSend(stateJSON) {
-		log.Printf("[SessionManager] Failed to send to specific client %s (channel closed or full)", userID)
 	}
 }
 
@@ -712,15 +647,12 @@ func (sm *SessionManager) BroadcastGameState(passcode string) {
 	sm.broadcastMu.Unlock()
 	
 	// ログ出力を削減（パフォーマンス改善）
-	// log.Printf("[SessionManager] BroadcastGameState called for passcode: %s", passcode)
 	sm.mu.RLock()
 	session, ok := sm.sessions[passcode]
 	sm.mu.RUnlock()
 	if !ok {
-		log.Printf("[SessionManager] Attempted to broadcast for non-existent passcode: %s", passcode)
 		return
 	}
-	// log.Printf("[SessionManager] Session found for passcode %s, status: %s", passcode, session.Status)
 
 	// ゲーム状態更新イベントを SessionManager のブロードキャストチャネルに送信
 	// チャネルがフルの場合は最新の状態のみ保持（負荷軽減）
@@ -729,9 +661,7 @@ func (sm *SessionManager) BroadcastGameState(passcode string) {
 		RoomID: passcode, // 合言葉を使用
 		State:  session, // セッション全体の状態を送信
 	}:
-		// log.Printf("[SessionManager] Broadcast event sent to channel for passcode: %s", passcode)
 	default:
-		log.Printf("[SessionManager] Broadcast channel full, skipping update for passcode: %s", passcode)
 	}
 }
 
@@ -745,12 +675,10 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 
 	session, ok := sm.sessions[passcode]
 	if !ok {
-		log.Printf("[SessionManager] EndGameSession called for non-existent passcode: %s", passcode)
 		return // 合言葉が存在しない
 	}
 
 	if session.Status == "finished" {
-		log.Printf("[SessionManager] EndGameSession called for already finished passcode: %s", passcode)
 		return // 既に終了済み
 	}
 
@@ -759,13 +687,9 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 	
 	// 終了理由を判定してログ出力
 	if session.IsTimeUp() {
-		log.Printf("[SessionManager] Game session %s ended by TIME LIMIT (100 seconds).", passcode)
 	} else if session.Player1 != nil && session.Player1.IsGameOver {
-		log.Printf("[SessionManager] Game session %s ended by GAME OVER - Player1: %s", passcode, session.Player1.UserID)
 	} else if session.Player2 != nil && session.Player2.IsGameOver {
-		log.Printf("[SessionManager] Game session %s ended by GAME OVER - Player2: %s", passcode, session.Player2.UserID)
 	} else {
-		log.Printf("[SessionManager] Game session %s ended by OTHER REASON.", passcode)
 	}
 
 	// ゲーム結果をランキングデータベースに記録する
@@ -777,17 +701,15 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 	sm.BroadcastGameState(passcode)
 	
 	// ゲーム終了の通知をクライアントが受信する時間を確保（3秒待機）
-	log.Printf("[SessionManager] Waiting 3 seconds for clients to receive final game state...")
 	time.Sleep(3 * time.Second)
 	
 	sm.mu.Lock()
 
 	// セッションに関連するクライアントのクリーンアップ
 	var clientsToUnregister []*Client
-	for userID, client := range sm.clients {
+	for _, client := range sm.clients {
 		if client.RoomID == passcode {
 			clientsToUnregister = append(clientsToUnregister, client)
-			log.Printf("[SessionManager] Marking client %s for cleanup from ended passcode %s", userID, passcode)
 		}
 	}
 
@@ -796,12 +718,10 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 		// Sendチャネルを安全に閉じる
 		client.SafeClose()
 		delete(sm.clients, client.UserID)
-		log.Printf("[SessionManager] Cleaned up client %s from ended passcode %s", client.UserID, passcode)
 	}
 
 	// セッションマネージャーのマップからセッションを削除
 	delete(sm.sessions, passcode)
-	log.Printf("[SessionManager] Removed session %s from sessions map", passcode)
 }
 
 // GetGameSession は指定された合言葉のゲームセッションを取得します。
@@ -828,7 +748,6 @@ func (sm *SessionManager) DeleteSession(passcode string) error {
 		if client, ok := sm.clients[session.Player1.UserID]; ok {
 			client.SafeClose()
 			delete(sm.clients, session.Player1.UserID)
-			log.Printf("[SessionManager] Disconnected player1 %s from deleted session %s", session.Player1.UserID, passcode)
 		}
 	}
 	
@@ -836,28 +755,24 @@ func (sm *SessionManager) DeleteSession(passcode string) error {
 		if client, ok := sm.clients[session.Player2.UserID]; ok {
 			client.SafeClose()
 			delete(sm.clients, session.Player2.UserID)
-			log.Printf("[SessionManager] Disconnected player2 %s from deleted session %s", session.Player2.UserID, passcode)
 		}
 	}
 	
 	// セッションをマップから削除
 	delete(sm.sessions, passcode)
-	log.Printf("[SessionManager] Deleted session %s", passcode)
 	
 	return nil
 }
 
 // Shutdown はSessionManagerを安全にシャットダウンします
 func (sm *SessionManager) Shutdown() {
-	log.Printf("[SessionManager] シャットダウン開始...")
 	
 	// quitチャネルを閉じてRunメソッドのメインループを終了
 	close(sm.quit)
 	
 	// 全クライアントを安全に切断
 	sm.mu.Lock()
-	for userID, client := range sm.clients {
-		log.Printf("[SessionManager] クライアント %s を切断中...", userID)
+	for _, client := range sm.clients {
 		if client.Conn != nil {
 			client.Conn.Close()
 		}
@@ -870,23 +785,19 @@ func (sm *SessionManager) Shutdown() {
 	sm.sessions = make(map[string]*GameSession)
 	sm.mu.Unlock()
 	
-	log.Printf("[SessionManager] シャットダウン完了")
 } 
 
 // saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをresultsテーブルに保存します
 func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
 	if session == nil {
-		log.Printf("[SessionManager] saveGameResultsToRanking called with nil session")
 		return
 	}
 
-	log.Printf("[SessionManager] Saving game results for session: %s", session.ID)
 
 	// プレイヤー1のスコアを保存
 	if session.Player1 != nil {
 		err := sm.savePlayerScore(session.Player1.UserID, session.Player1.Score, "Player1")
 		if err != nil {
-			log.Printf("[SessionManager] Failed to save Player1 score: %v", err)
 		}
 	}
 
@@ -894,7 +805,6 @@ func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
 	if session.Player2 != nil {
 		err := sm.savePlayerScore(session.Player2.UserID, session.Player2.Score, "Player2")
 		if err != nil {
-			log.Printf("[SessionManager] Failed to save Player2 score: %v", err)
 		}
 	}
 }
@@ -910,14 +820,10 @@ func (sm *SessionManager) savePlayerScore(userID string, score int, playerName s
 	}
 
 	// resultsテーブルに保存
-	result, err := sm.resultRepo.CreateResult(nil, userID, score)
+	_, err := sm.resultRepo.CreateResult(nil, userID, score)
 	if err != nil {
-		log.Printf("[SessionManager] Failed to save %s (%s) score to results: %v", playerName, userID, err)
 		return fmt.Errorf("スコア保存に失敗しました: %w", err)
 	}
-
-	log.Printf("[SessionManager] Successfully saved %s (%s) score: %d (result ID: %d)", 
-		playerName, userID, score, result.ID)
 	return nil
 }
 
@@ -933,7 +839,6 @@ func (sm *SessionManager) savePlayerScore(userID string, score int, playerName s
 //   bool: 新しくセッションを作成したかどうか（true: 作成、false: 既存セッションに参加）
 //   error: エラーが発生した場合
 func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID string) (string, bool, error) {
-	log.Printf("[SessionManager] JoinRoomByPasscode called with passcode: %s, playerID: %s, playerDeckID: %s", passcode, playerID, playerDeckID)
 	
 	// 合言葉のバリデーション
 	if passcode == "" {
@@ -950,19 +855,16 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 	
 	if !exists {
 		// セッションが存在しない場合、新しく作成（プレイヤー1として）
-		log.Printf("[SessionManager] Creating new session for passcode: %s", passcode)
 		
 			// ゲストユーザーの場合はnilデッキを設定
 	var playerDeck *models.Deck
 	if playerDeckID == "guest" || playerDeckID == "" {
-		log.Printf("[SessionManager] Guest user detected (deck_id: %s), setting deck to nil for guest deck generation", playerDeckID)
 		playerDeck = nil
 	} else {
 		// データベースからプレイヤーのデッキデータをロード
 		var err error
 		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
 		if err != nil {
-			log.Printf("[SessionManager] Failed to get player deck %s: %v", playerDeckID, err)
 			return "", false, fmt.Errorf("failed to get player deck: %w", err)
 		}
 	}
@@ -970,57 +872,46 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 		// 新しいゲームセッションを初期化（IDは合言葉を使用）
 		newSession, err := NewGameSession(passcode, playerID, playerDeck, sm.deckRepo)
 		if err != nil {
-			log.Printf("[SessionManager] Failed to create GameSession: %v", err)
 			return "", false, fmt.Errorf("failed to create game session: %w", err)
 		}
 		sm.sessions[passcode] = newSession
-		log.Printf("[SessionManager] Created new game session with passcode: %s for player %s", passcode, playerID)
 		
 		return passcode, true, nil
 		
 	} else {
 		// セッションが存在する場合、プレイヤー2として参加
-		log.Printf("[SessionManager] Session found for passcode: %s, current status: %s", passcode, session.Status)
 		
 		if session.Status != "waiting" {
-			log.Printf("[SessionManager] Session %s is not waiting (status: %s)", passcode, session.Status)
 			return "", false, errors.New("このルームは既にゲーム中または終了しています")
 		}
 		
 		if session.Player2 != nil {
-			log.Printf("[SessionManager] Session %s already has player2", passcode)
 			return "", false, errors.New("このルームは既に満室です")
 		}
 		
 		// 開発・テスト用: 環境変数でこの制限を無効化可能
 		if os.Getenv("ALLOW_SAME_USER_JOIN") != "true" {
 			if session.Player1 != nil && session.Player1.UserID == playerID {
-				log.Printf("[SessionManager] Player %s cannot join their own room %s", playerID, passcode)
 				return "", false, errors.New("自分が作成したルームには参加できません")
 			}
 		} else {
-			log.Printf("[SessionManager] ALLOW_SAME_USER_JOIN=true: Same user join allowed for testing")
 		}
 
-			log.Printf("[SessionManager] Adding player2 to existing session: %s", passcode)
 	
 	// ゲストユーザーの場合はnilデッキを設定
 	var playerDeck *models.Deck
 	if playerDeckID == "guest" || playerDeckID == "" {
-		log.Printf("[SessionManager] Guest user detected for player2 (deck_id: %s), setting deck to nil for guest deck generation", playerDeckID)
 		playerDeck = nil
 	} else {
 		// データベースからプレイヤー2のデッキデータをロード
 		var err error
 		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
 		if err != nil {
-			log.Printf("[SessionManager] Failed to get player2 deck %s: %v", playerDeckID, err)
 			return "", false, fmt.Errorf("failed to get player2 deck: %w", err)
 		}
 	}
 
 		session.SetPlayer2(playerID, playerDeck, sm.deckRepo)
-		log.Printf("[SessionManager] Player %s joined session %s successfully", playerID, passcode)
 
 		return passcode, false, nil
 	}
