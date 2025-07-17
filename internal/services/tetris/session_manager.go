@@ -323,11 +323,6 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 	
 	session, ok := sm.sessions[passcode]
 	if !ok {
-		// デバッグ用: 存在するセッションパスコードをログ出力
-		var existingPasscodes []string
-		for code := range sm.sessions {
-			existingPasscodes = append(existingPasscodes, code)
-		}
 		return // セッションが存在しない
 	}
 	

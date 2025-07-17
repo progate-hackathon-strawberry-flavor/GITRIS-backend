@@ -299,10 +299,8 @@ func updateContributionScoresFromPiece(state *PlayerGameState, piece *tetris.Pie
 			if found {
 				state.ContributionScores[scoreKey] = score
 			}
-		} else {
 		}
 	}
-	
 }
 
 // CalculateScore はラインクリア数、レベル、コンボなどに基づいて追加スコアを計算します。
