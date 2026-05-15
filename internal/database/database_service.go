@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQLドライバー
@@ -56,6 +58,45 @@ func (s *DatabaseService) GetGitHubUsernameByUserID(userID string) (string, erro
 	}
 	log.Printf("DatabaseService Info: ユーザーID %s に対応するGitHubユーザー名 '%s' を取得しました。", userID, githubUsername)
 	return githubUsername, nil
+}
+
+// GetGitHubAccessToken fetches the GitHub access token for a given user ID (UUID).
+func (s *DatabaseService) GetGitHubAccessToken(userID string) (string, error) {
+	var accessToken string
+	query := `SELECT github_access_token FROM users WHERE id = $1`
+	err := s.DB.QueryRow(query, userID).Scan(&accessToken)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("ユーザーID %s に紐づくGitHub Access Tokenが見つかりません。", userID)
+		}
+		return "", fmt.Errorf("GitHub Access Tokenの取得に失敗しました: %w", err)
+	}
+	if accessToken == "" {
+		return "", fmt.Errorf("ユーザーID %s のGitHub Access Tokenが設定されていません。", userID)
+	}
+	log.Printf("DatabaseService Info: ユーザーID %s のGitHub Access Tokenを取得しました。", userID)
+	return accessToken, nil
+}
+
+// ApplySQLFile reads a SQL file and executes it against the current database.
+func (s *DatabaseService) ApplySQLFile(sqlFilePath string) error {
+	sqlBytes, err := os.ReadFile(sqlFilePath)
+	if err != nil {
+		return fmt.Errorf("SQLファイルの読み込みに失敗しました (%s): %w", sqlFilePath, err)
+	}
+
+	script := strings.TrimSpace(string(sqlBytes))
+	if script == "" {
+		log.Printf("DatabaseService Info: SQLファイルが空のため適用をスキップします: %s", sqlFilePath)
+		return nil
+	}
+
+	if _, err := s.DB.Exec(script); err != nil {
+		return fmt.Errorf("SQLファイルの適用に失敗しました (%s): %w", sqlFilePath, err)
+	}
+
+	log.Printf("DatabaseService Info: SQLファイルを適用しました: %s", sqlFilePath)
+	return nil
 }
 
 // GetContributionsByUserID retrieves all contributions for a specific user from the database.
@@ -149,13 +190,16 @@ func min(a, b int) int {
 // GetDeckByID は指定されたIDのデッキをデータベースから取得します。
 //
 // Parameters:
-//   deckID : 取得するデッキのUUID
+//
+//	deckID : 取得するデッキのUUID
+//
 // Returns:
-//   *models.Deck: 取得したデッキのポインタ
-//   error : エラーが発生した場合
+//
+//	*models.Deck: 取得したデッキのポインタ
+//	error : エラーが発生した場合
 func (s *DatabaseService) GetDeckByID(deckID string) (*models.Deck, error) {
 	log.Printf("DatabaseService Info: デッキID %s のデッキデータを取得中...", deckID)
-	
+
 	// UUID形式でない場合はテスト用デッキを返す
 	if deckID == "test-deck-id" || len(deckID) != 36 {
 		log.Printf("DatabaseService Info: テスト用デッキID %s のため、テスト用デッキを生成します", deckID)
@@ -167,10 +211,10 @@ func (s *DatabaseService) GetDeckByID(deckID string) (*models.Deck, error) {
 			UpdatedAt:  time.Now(),
 		}, nil
 	}
-	
+
 	var deck models.Deck
 	query := `SELECT id, user_id, total_score, created_at, updated_at FROM decks WHERE id = $1`
-	
+
 	err := s.DB.QueryRow(query, deckID).Scan(
 		&deck.ID,
 		&deck.UserID,
@@ -178,7 +222,7 @@ func (s *DatabaseService) GetDeckByID(deckID string) (*models.Deck, error) {
 		&deck.CreatedAt,
 		&deck.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// テスト用: デッキが存在しない場合は仮のデッキを返す
@@ -194,7 +238,7 @@ func (s *DatabaseService) GetDeckByID(deckID string) (*models.Deck, error) {
 		log.Printf("DatabaseService Error: デッキ取得エラー: %v", err)
 		return nil, fmt.Errorf("デッキの取得に失敗しました: %w", err)
 	}
-	
+
 	log.Printf("DatabaseService Info: デッキID %s のデッキデータを正常に取得しました", deckID)
 	return &deck, nil
 }
@@ -214,15 +258,13 @@ func (s *DatabaseService) GetUserDisplayNameByUserID(userID string) string {
 		log.Printf("DatabaseService Error: ユーザー名の取得に失敗しました: %v, 「ゲスト」を返します", err)
 		return "ゲスト"
 	}
-	
+
 	// user_nameがNULLまたは空文字列の場合も「ゲスト」を返す
 	if !userName.Valid || userName.String == "" {
 		log.Printf("DatabaseService Info: ユーザーID %s のuser_nameが空のため、「ゲスト」を返します", userID)
 		return "ゲスト"
 	}
-	
+
 	log.Printf("DatabaseService Info: ユーザーID %s に対応するユーザー名 '%s' を取得しました", userID, userName.String)
 	return userName.String
 }
-
-
