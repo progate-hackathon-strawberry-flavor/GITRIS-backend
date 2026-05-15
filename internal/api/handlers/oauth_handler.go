@@ -202,7 +202,7 @@ func exchangeCodeForTokenWithCreds(code, clientID, clientSecret string) (string,
 //github oauthのコード交換とユーザー情報取得の関数
 //ロゴが入っていない？
 
-// GetUserInfoHandler handles GET /api/auth/me to return authenticated user info
+// 認証されたユーザーの情報を取得するハンドラー
 func (h *OAuthHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	w.Header().Set("Content-Type", "application/json")
