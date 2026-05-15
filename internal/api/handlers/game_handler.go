@@ -206,9 +206,9 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 
 			} else {
 				// JWT Secretを取得
-				jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
+				jwtSecret := os.Getenv("JWT_SECRET")
 				if jwtSecret == "" {
-					log.Println("Error: SUPABASE_JWT_SECRET environment variable is not set.")
+					log.Println("Error: JWT_SECRET environment variable is not set.")
 					conn.WriteJSON(map[string]string{"error": "Server configuration error: JWT secret missing"})
 					conn.Close()
 					return
@@ -221,7 +221,7 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 				}
 
 				// JWTの検証とパース
-				parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+				parsedToken, err := jwt.ParseWithClaims(tokenString, &CustomJWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 					// アルゴリズムがHMACであることを確認
 					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 						log.Printf("WebSocket Auth Error: Unexpected signing method: %v", token.Header["alg"])
@@ -245,7 +245,7 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 				}
 
 				// トークンのクレームを取得
-				claims, ok := parsedToken.Claims.(jwt.MapClaims)
+				claims, ok := parsedToken.Claims.(*CustomJWTClaims)
 				if !ok {
 					log.Printf("WebSocket Auth Error: Invalid token claims")
 					conn.WriteJSON(map[string]string{"error": "Invalid token claims"})
@@ -253,10 +253,10 @@ func (h *GameHandler) HandleWebSocketConnection(w http.ResponseWriter, r *http.R
 					return
 				}
 
-				// SupabaseのJWTは通常、ユーザーIDを 'sub' (Subject) クレームにUUIDとして格納します。
-				userID, ok = claims["sub"].(string)
-				if !ok {
-					log.Printf("WebSocket Auth Error: JWT claims missing 'sub' (userID) or wrong type: %v", claims["sub"])
+				// バックエンドJWTでは user_id クレームを使用します。
+				userID = claims.UserID
+				if userID == "" {
+					log.Printf("WebSocket Auth Error: JWT claims missing user_id")
 					conn.WriteJSON(map[string]string{"error": "Invalid token: missing user ID"})
 					conn.Close()
 					return
