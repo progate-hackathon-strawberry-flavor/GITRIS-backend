@@ -15,7 +15,7 @@ import (
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
 )
 
-// GetUserIDFromContext retrieves the user ID from the context.
+// コンテキストからユーザーIDを取得する関数
 func GetUserIDFromContext(ctx context.Context) (string, bool) {
 	return middleware.GetUserIDFromContext(ctx)
 }
@@ -51,7 +51,7 @@ type CustomJWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// ExchangeCodeForToken exchanges GitHub OAuth code for access token
+// GitHubから受け取った OAuth code を　GitHub apiにアクセスする access tokenに交換する関数
 func ExchangeCodeForToken(code string) (string, error) {
 	clientID := os.Getenv("GITHUB_CLIENT_ID")
 	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
@@ -63,7 +63,7 @@ func ExchangeCodeForToken(code string) (string, error) {
 	return ExchangeCodeForTokenWithParams(code, clientID, clientSecret)
 }
 
-// ExchangeCodeForTokenWithParams exchanges GitHub OAuth code for access token with provided credentials
+// 取得したアクセストークンを使ってGitHub APIからユーザ情報を取得する関数
 func ExchangeCodeForTokenWithParams(code, clientID, clientSecret string) (string, error) {
 	payload := map[string]string{
 		"client_id":     clientID,
@@ -99,7 +99,7 @@ func ExchangeCodeForTokenWithParams(code, clientID, clientSecret string) (string
 	return tokenResp.AccessToken, nil
 }
 
-// GetGitHubUser retrieves GitHub user information using access token
+// アクセストークンを使って、GitHub APIからユーザ情報を取得する関数
 func GetGitHubUser(accessToken string) (*GitHubUserResponse, error) {
 	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
 	if err != nil {
@@ -129,7 +129,7 @@ func GetGitHubUser(accessToken string) (*GitHubUserResponse, error) {
 	return &user, nil
 }
 
-// GenerateJWT generates a JWT token for authenticated users
+// アプリ内で認証されたユーザに使うJWTを生成する関数
 func GenerateJWT(userID string, githubID int, login string) (string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
