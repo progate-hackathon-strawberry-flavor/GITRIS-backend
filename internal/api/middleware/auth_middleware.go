@@ -38,6 +38,12 @@ type CustomJWTClaims struct {
 // AuthMiddleware is a middleware function that checks for a valid JWT token.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CORSプリフライト（OPTIONS）リクエストはスキップ
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// テスト用: 環境変数で認証をバイパス可能にする
 		if os.Getenv("BYPASS_AUTH") == "true" {
 			// テスト用のランダムなユーザーIDを生成（毎回異なるユーザーとして扱う）

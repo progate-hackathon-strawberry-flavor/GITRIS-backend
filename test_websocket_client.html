@@ -523,7 +523,7 @@
         // WebSocket接続
         function connectWebSocket() {
             const passcode = document.getElementById('passcode').value;
-            const userId = document.getElementById('userId').value;
+            const authToken = document.getElementById('authToken').value.trim();
             
             if (!passcode) {
                 alert('合言葉を入力してください');
@@ -535,11 +535,11 @@
                 return;
             }
             
-            if (!userId) {
-                alert('ユーザーIDを入力してください');
+            if (!authToken) {
+                alert('認証トークンを入力してください');
                 return;
             }
-            
+
             // 動的にWebSocket URLを構築
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host || 'localhost:8080'; // フォールバック
@@ -557,9 +557,10 @@
                 document.getElementById('passcodeStatus').textContent = passcode;
                 
                 // 認証メッセージを送信
+                const token = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
                 const authMessage = {
                     type: 'auth',
-                    token: document.getElementById('authToken').value
+                    token: token
                 };
                 socket.send(JSON.stringify(authMessage));
                 log('認証メッセージを送信しました');

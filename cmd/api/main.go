@@ -153,21 +153,17 @@ func main() {
 	// OAuth callback endpoint (認証不要)
 	r.HandleFunc("/api/auth/callback", oauthHandler.HandleOAuthCallback).Methods("POST", "OPTIONS")
 
-	// 認証済みユーザーのinfo取得エンドポイント
-	r.HandleFunc("/api/auth/me", oauthHandler.GetUserInfoHandler).Methods("GET", "OPTIONS")
-
-	// データベースから保存済みのGitHub Contributionデータを取得するエンドポイント
-	// GET /api/contributions/{userID}
-	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET", "OPTIONS")
-
-	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
-	// POST /api/contributions/refresh/{userID} (または PUT)
-	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST", "OPTIONS")
-
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
 	protectedRouter.Use(auth.AuthMiddleware)
 	protectedRouter.Use(auth.CORSHandler()) // CORSミドルウェアを追加
+
+	// 認証済みユーザーのinfo取得エンドポイント
+	protectedRouter.HandleFunc("/auth/me", oauthHandler.GetUserInfoHandler).Methods("GET", "OPTIONS")
+	// JWTで認証されたユーザー本人のデータのみを扱うエンドポイント
+	protectedRouter.HandleFunc("/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST", "OPTIONS")
+	protectedRouter.HandleFunc("/results", resultHandler.PostScore).Methods("POST", "OPTIONS")
 
 	// 認証済みユーザーのみが自身のデッキを保存できるようにします
 	protectedRouter.Handle("/deck/save", deckSaveHandler).Methods("POST", "OPTIONS")
@@ -190,7 +186,6 @@ func main() {
 
 	// ゲーム結果関連のエンドポイント
 	r.HandleFunc("/api/results", resultHandler.GetTopResults).Methods("GET", "OPTIONS")
-	r.HandleFunc("/api/results", resultHandler.PostScore).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/results/user/{user_id}", resultHandler.GetUserResult).Methods("GET", "OPTIONS")
 
 	// ポート番号の設定

@@ -61,24 +61,31 @@ func (h *ResultHandler) PostScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authenticatedUserID, ok := GetUserIDFromContext(r.Context())
+	if !ok || authenticatedUserID == "" {
+		http.Error(w, "未認証です", http.StatusUnauthorized)
+		return
+	}
+
 	var req models.ResultRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "無効なリクエストボディです", http.StatusBadRequest)
 		return
 	}
 
-	// バリデーション
-	if req.UserID == "" {
-		http.Error(w, "user_idは必須です", http.StatusBadRequest)
+	// JWT の userID を正として扱う。body に user_id があれば一致しているかだけ確認する。
+	if req.UserID != "" && req.UserID != authenticatedUserID {
+		http.Error(w, "認可されていない user_id です", http.StatusForbidden)
 		return
 	}
+	req.UserID = authenticatedUserID
 	if req.Score < 0 {
 		http.Error(w, "スコアは0以上である必要があります", http.StatusBadRequest)
 		return
 	}
 
 	// スコアを保存
-	result, err := h.resultRepo.CreateResult(nil, req.UserID, req.Score)
+	result, err := h.resultRepo.CreateResult(nil, authenticatedUserID, req.Score)
 	if err != nil {
 		log.Printf("スコア保存エラー: %v", err)
 		http.Error(w, "スコア保存に失敗しました", http.StatusInternalServerError)
@@ -129,4 +136,4 @@ func (h *ResultHandler) GetUserResult(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"result":  userResult,
 	})
-} 
+}

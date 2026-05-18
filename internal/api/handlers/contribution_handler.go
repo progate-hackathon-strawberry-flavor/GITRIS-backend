@@ -37,13 +37,19 @@ func (h *ContributionHandler) GetDailyContributionsAndSaveHandler(w http.Respons
 		return
 	}
 
-	vars := mux.Vars(r)
-	userID := vars["userID"]
-
-	if userID == "" {
-		http.Error(w, "ユーザーIDが指定されていません。", http.StatusBadRequest)
+	authenticatedUserID, ok := GetUserIDFromContext(r.Context())
+	if !ok || authenticatedUserID == "" {
+		http.Error(w, "未認証です", http.StatusUnauthorized)
 		return
 	}
+
+	vars := mux.Vars(r)
+	requestedUserID := vars["userID"]
+	if requestedUserID != "" && requestedUserID != authenticatedUserID {
+		http.Error(w, "認可されていない操作です", http.StatusForbidden)
+		return
+	}
+	userID := authenticatedUserID
 
 	// ユーザーの GitHub Access Token をデータベースから取得
 	githubToken, err := h.DatabaseService.GetGitHubAccessToken(userID)
@@ -101,18 +107,19 @@ func (h *ContributionHandler) GetSavedContributionsHandler(w http.ResponseWriter
 		return
 	}
 
-	vars := mux.Vars(r)
-	userID := vars["userID"]
-
-	if userID == "" {
-		http.Error(w, "ユーザーIDが指定されていません。", http.StatusBadRequest)
+	authenticatedUserID, ok := GetUserIDFromContext(r.Context())
+	if !ok || authenticatedUserID == "" {
+		http.Error(w, "未認証です", http.StatusUnauthorized)
 		return
 	}
 
-	// NOTE: 本来は認証ミドルウェアからuserIDを取得し、それを認証済みユーザーのIDとして使用します。
-	// 例: userID := r.Context().Value("userID").(string) のように。
-	// ここはデバッグ/テスト用なので、DBに存在するユーザーのUUIDをハードコードしてください。
-	// 例: userID = "f47ac10b-58cc-4372-a567-0e02b2c3d4e5"
+	vars := mux.Vars(r)
+	requestedUserID := vars["userID"]
+	if requestedUserID != "" && requestedUserID != authenticatedUserID {
+		http.Error(w, "認可されていない操作です", http.StatusForbidden)
+		return
+	}
+	userID := authenticatedUserID
 
 	if h.DatabaseService == nil {
 		http.Error(w, "DatabaseServiceが初期化されていません。", http.StatusInternalServerError)

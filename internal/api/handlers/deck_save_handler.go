@@ -38,21 +38,12 @@ func (h *DeckSaveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("認証済みユーザーID: %s がデッキ保存リクエストを送信しました。", userID)
 
-
 	// リクエストボディをパースします
 	var req models.DeckSaveRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		log.Printf("リクエストボディのパースに失敗しました: %v", err)
 		http.Error(w, "不正なリクエスト: 無効なリクエストボディです", http.StatusBadRequest)
-		return
-	}
-
-	// セキュリティ検証: リクエストボディのユーザーIDと認証済みユーザーIDが一致するか確認します。
-	// クライアントから送られてくるuserIDはあくまで参考とし、JWTから取得した認証済みuserIDを信頼すべきです。
-	if req.UserID != userID {
-		log.Printf("不正なデッキ保存試行: リクエストユーザーID %s vs 認証済みユーザーID %s", req.UserID, userID)
-		http.Error(w, "未認証: ユーザーIDが一致しません", http.StatusUnauthorized)
 		return
 	}
 
