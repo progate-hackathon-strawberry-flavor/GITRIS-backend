@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"log"
@@ -32,23 +31,31 @@ func NewContributionHandler(ghService *github.GitHubService, dbService *database
 // POST /api/contributions/refresh/{userID} (推奨されるエンドポイント)
 // 現在の GET /api/contributions/{userID} の機能をこちらに移動
 func (h *ContributionHandler) GetDailyContributionsAndSaveHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userID"]
-
-	if userID == "" {
-		http.Error(w, "ユーザーIDが指定されていません。", http.StatusBadRequest)
+	// OPTIONS メソッドの処理
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// NOTE: 本来は認証ミドルウェアからuserIDを取得し、それを認証済みユーザーのIDとして使用します。
-	// 例えば、userID := r.Context().Value("userID").(string) のように。
-	// ここはデバッグ/テスト用なので、DBに存在するユーザーのUUIDをハードコードしてください。
-	// 例: userID = "f47ac10b-58cc-4372-a567-0e02b2c3d4e5"
+	authenticatedUserID, ok := GetUserIDFromContext(r.Context())
+	if !ok || authenticatedUserID == "" {
+		http.Error(w, "未認証です", http.StatusUnauthorized)
+		return
+	}
 
-	githubToken := os.Getenv("GITHUB_TOKEN")
-	if githubToken == "" {
-		log.Println("警告: GITHUB_TOKEN 環境変数が設定されていません。")
-		http.Error(w, "サーバーサイドにGitHub Personal Access Tokenが設定されていません。", http.StatusInternalServerError)
+	vars := mux.Vars(r)
+	requestedUserID := vars["userID"]
+	if requestedUserID != "" && requestedUserID != authenticatedUserID {
+		http.Error(w, "認可されていない操作です", http.StatusForbidden)
+		return
+	}
+	userID := authenticatedUserID
+
+	// ユーザーの GitHub Access Token をデータベースから取得
+	githubToken, err := h.DatabaseService.GetGitHubAccessToken(userID)
+	if err != nil {
+		log.Printf("GetGitHubAccessToken エラー: %v", err)
+		http.Error(w, fmt.Sprintf("ユーザーの GitHub Access Token が見つかりません: %v", err), http.StatusUnauthorized)
 		return
 	}
 
@@ -63,7 +70,7 @@ func (h *ContributionHandler) GetDailyContributionsAndSaveHandler(w http.Respons
 	endDate := time.Now()
 	startDate := endDate.AddDate(0, 0, -8*7+1) // 8週間 = 56日前
 
-	// 取得したgithubUsernameを使ってGitHub APIを呼び出す
+	// 取得したgithubUsernameとユーザーのトークンを使ってGitHub APIを呼び出す
 	dailyContributions, err := h.GitHubService.GetDailyContributions(githubUsername, githubToken, startDate, endDate)
 	if err != nil {
 		fmt.Printf("GitHub貢献データの取得に失敗しました: %v\n", err)
@@ -94,18 +101,25 @@ func (h *ContributionHandler) GetDailyContributionsAndSaveHandler(w http.Respons
 // GetSavedContributionsHandler fetches saved daily contributions from the database.
 // GET /api/contributions/{userID}
 func (h *ContributionHandler) GetSavedContributionsHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userID"]
-
-	if userID == "" {
-		http.Error(w, "ユーザーIDが指定されていません。", http.StatusBadRequest)
+	// OPTIONS メソッドの処理
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// NOTE: 本来は認証ミドルウェアからuserIDを取得し、それを認証済みユーザーのIDとして使用します。
-	// 例: userID := r.Context().Value("userID").(string) のように。
-	// ここはデバッグ/テスト用なので、DBに存在するユーザーのUUIDをハードコードしてください。
-	// 例: userID = "f47ac10b-58cc-4372-a567-0e02b2c3d4e5"
+	authenticatedUserID, ok := GetUserIDFromContext(r.Context())
+	if !ok || authenticatedUserID == "" {
+		http.Error(w, "未認証です", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	requestedUserID := vars["userID"]
+	if requestedUserID != "" && requestedUserID != authenticatedUserID {
+		http.Error(w, "認可されていない操作です", http.StatusForbidden)
+		return
+	}
+	userID := authenticatedUserID
 
 	if h.DatabaseService == nil {
 		http.Error(w, "DatabaseServiceが初期化されていません。", http.StatusInternalServerError)

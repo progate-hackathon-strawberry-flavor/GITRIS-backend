@@ -35,6 +35,5 @@ type TetriminoPlacementRequest struct {
 
 // DeckSaveRequest はデッキ保存APIへのリクエストボディ全体を定義します。
 type DeckSaveRequest struct {
-	UserID    string                      `json:"userId"`    // 認証されたユーザーのID。フロントエンドから渡されるが、バックエンドで検証済みIDを優先
 	Tetriminos []TetriminoPlacementRequest `json:"tetriminos"`
 }

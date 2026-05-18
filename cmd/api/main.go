@@ -16,17 +16,62 @@ import (
 	auth "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/github"
-	services "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/deck" // 新しいサービスのインポート
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/tetris"        // テトリスサービスをインポート
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
+	deck "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/deck"
+	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/tetris"
 )
 
 func main() {
+	ctx := context.Background()
+
 	// .envファイルを読み込む (本番環境以外の場合)
 	if os.Getenv("APP_ENV") != "production" {
 		err := godotenv.Load()
 		if err != nil {
 			log.Printf("warning: .envファイルの読み込み中にエラーが発生しました (本番環境では問題ありません): %v", err)
 		}
+	}
+
+	// AWS Secrets Manager クライアントを初期化
+	secretsMgr, err := services.NewSecretsManagerClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize Secrets Manager: %v", err)
+	}
+	defer secretsMgr.Close()
+
+	// Secrets Manager から JWT秘密鍵を取得
+	jwtSecret, err := secretsMgr.GetJWTSecret(ctx, "gitris/jwt-secret")
+	if err != nil {
+		log.Printf("Warning: Could not retrieve JWT secret from Secrets Manager, falling back to environment variable: %v", err)
+		// Fallback to environment variable
+		if os.Getenv("JWT_SECRET") == "" {
+			log.Fatal("JWT_SECRET must be set in environment or Secrets Manager")
+		}
+	} else {
+		// Override with Secrets Manager value
+		os.Setenv("JWT_SECRET", jwtSecret.Secret)
+		log.Println("JWT secret loaded from Secrets Manager")
+	}
+
+	// Secrets Manager からデータベース認証情報を取得
+	dbSecret, err := secretsMgr.GetDatabaseSecret(ctx, "gitris/database")
+	if err != nil {
+		log.Printf("Warning: Could not retrieve database secret from Secrets Manager, falling back to environment variable: %v", err)
+		// Fallback to environment variable
+		if os.Getenv("DATABASE_URL") == "" {
+			log.Fatal("DATABASE_URL must be set in environment or Secrets Manager")
+		}
+	} else {
+		// Construct DATABASE_URL from secret
+		databaseURL := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=require",
+			dbSecret.Username,
+			dbSecret.Password,
+			dbSecret.Host,
+			dbSecret.Port,
+			dbSecret.DBName,
+		)
+		os.Setenv("DATABASE_URL", databaseURL)
+		log.Println("Database credentials loaded from Secrets Manager")
 	}
 
 	// データベースURLを環境変数から取得
@@ -45,11 +90,35 @@ func main() {
 	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
 	fmt.Println("データベース接続が正常に確立されました。")
 
+	// 起動時に初期スキーマSQLを適用
+	migrationPath := os.Getenv("DB_MIGRATION_FILE")
+	if migrationPath == "" {
+		migrationPath = "migrations/001_initial_schema.sql"
+	}
+
+	migrationCandidates := []string{migrationPath, "../../" + migrationPath}
+	applied := false
+	for _, candidate := range migrationCandidates {
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			if err := databaseService.ApplySQLFile(candidate); err != nil {
+				log.Fatalf("SQLマイグレーション適用に失敗しました: %v", err)
+			}
+			applied = true
+			break
+		}
+	}
+
+	if !applied {
+		log.Fatalf("SQLマイグレーションファイルが見つかりません。DB_MIGRATION_FILE または migrations/001_initial_schema.sql を確認してください")
+	}
+
+	// ユーザーリポジトリの初期化
+	userRepo := database.NewUserRepository(databaseService.DB)
 
 	// Deck関連の依存関係の初期化
 	// databaseService.DB を直接リポジトリとサービスに渡す
 	deckRepo := database.NewDeckRepository(databaseService.DB)
-	deckService := services.NewDeckService(databaseService.DB, deckRepo)
+	deckService := deck.NewDeckService(databaseService.DB, deckRepo)
 
 	// ゲーム結果関連の依存関係の初期化
 	resultRepo := database.NewResultRepository(databaseService.DB)
@@ -60,11 +129,12 @@ func main() {
 
 	// ハンドラ層の初期化
 	contributionHandler := api.NewContributionHandler(githubService, databaseService)
-	deckSaveHandler := api.NewDeckSaveHandler(deckService) // デッキ保存ハンドラの初期化
-	deckGetHandler := api.NewDeckGetHandler(deckService) // デッキ取得ハンドラの初期化
+	deckSaveHandler := api.NewDeckSaveHandler(deckService)             // デッキ保存ハンドラの初期化
+	deckGetHandler := api.NewDeckGetHandler(deckService)               // デッキ取得ハンドラの初期化
 	gameHandler := api.NewGameHandler(sessionManager, databaseService) // ゲームハンドラの初期化
-	resultHandler := api.NewResultHandler(resultRepo) // ゲーム結果ハンドラの初期化
-	publicHandler := api.NewPublicHandler(databaseService) // 公開ハンドラの初期化
+	resultHandler := api.NewResultHandler(resultRepo)                  // ゲーム結果ハンドラの初期化
+	publicHandler := api.NewPublicHandler(databaseService)             // 公開ハンドラの初期化
+	oauthHandler := api.NewOAuthHandler(userRepo, secretsMgr)          // OAuth ハンドラの初期化（Aurora + Secrets Manager対応）
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 
@@ -80,18 +150,20 @@ func main() {
 	r.HandleFunc("/api/public", api.PublicHandlerFunc).Methods("GET")
 	r.HandleFunc("/api/user/{userID}/display-name", publicHandler.GetUserDisplayNameHandler).Methods("GET", "OPTIONS")
 
-	// データベースから保存済みのGitHub Contributionデータを取得するエンドポイント
-	// GET /api/contributions/{userID}
-	r.HandleFunc("/api/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET", "OPTIONS")
-
-	// GitHubから最新のContributionデータを取得し、データベースを更新するエンドポイント
-	// POST /api/contributions/refresh/{userID} (または PUT)
-	r.HandleFunc("/api/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST")
+	// OAuth callback endpoint (認証不要)
+	r.HandleFunc("/api/auth/callback", oauthHandler.HandleOAuthCallback).Methods("POST", "OPTIONS")
 
 	// 認証が必要なルートグループを作成
 	protectedRouter := r.PathPrefix("/api/protected").Subrouter()
 	protectedRouter.Use(auth.AuthMiddleware)
 	protectedRouter.Use(auth.CORSHandler()) // CORSミドルウェアを追加
+
+	// 認証済みユーザーのinfo取得エンドポイント
+	protectedRouter.HandleFunc("/auth/me", oauthHandler.GetUserInfoHandler).Methods("GET", "OPTIONS")
+	// JWTで認証されたユーザー本人のデータのみを扱うエンドポイント
+	protectedRouter.HandleFunc("/contributions/{userID}", contributionHandler.GetSavedContributionsHandler).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/contributions/refresh/{userID}", contributionHandler.GetDailyContributionsAndSaveHandler).Methods("POST", "OPTIONS")
+	protectedRouter.HandleFunc("/results", resultHandler.PostScore).Methods("POST", "OPTIONS")
 
 	// 認証済みユーザーのみが自身のデッキを保存できるようにします
 	protectedRouter.Handle("/deck/save", deckSaveHandler).Methods("POST", "OPTIONS")
@@ -114,7 +186,6 @@ func main() {
 
 	// ゲーム結果関連のエンドポイント
 	r.HandleFunc("/api/results", resultHandler.GetTopResults).Methods("GET", "OPTIONS")
-	r.HandleFunc("/api/results", resultHandler.PostScore).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/results/user/{user_id}", resultHandler.GetUserResult).Methods("GET", "OPTIONS")
 
 	// ポート番号の設定
@@ -125,8 +196,8 @@ func main() {
 
 	// HTTPサーバーの設定
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+		Addr:              ":" + port,
+		Handler:           r,
 		ReadHeaderTimeout: 30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -137,7 +208,7 @@ func main() {
 	if host == "" {
 		host = "localhost" // 開発環境のデフォルト
 	}
-	
+
 	log.Printf("サーバーをポート %s で起動中...", port)
 	// ユーザーに新しいURL形式を伝えるメッセージ
 	fmt.Printf("保存済みのGitHub Contributionデータを取得するには、以下のURLにアクセスしてください： http://%s:%s/api/contributions/{あなたのSupabase usersテーブルのUUID}\n", host, port)

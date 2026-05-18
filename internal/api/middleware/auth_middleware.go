@@ -27,9 +27,23 @@ func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
+// CustomJWTClaims represents custom JWT claims from backend
+type CustomJWTClaims struct {
+	UserID   string `json:"user_id"`
+	GitHubID int    `json:"github_id"`
+	Login    string `json:"login"`
+	jwt.RegisteredClaims
+}
+
 // AuthMiddleware is a middleware function that checks for a valid JWT token.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CORSプリフライト（OPTIONS）リクエストはスキップ
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// テスト用: 環境変数で認証をバイパス可能にする
 		if os.Getenv("BYPASS_AUTH") == "true" {
 			// テスト用のランダムなユーザーIDを生成（毎回異なるユーザーとして扱う）
@@ -58,17 +72,17 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. JWT Secretを取得
-		jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
+		// 2. JWT Secretを取得（バックエンド生成のトークン用）
+		jwtSecret := os.Getenv("JWT_SECRET")
 		log.Printf("AuthMiddleware Debug: JWT Secret length: %d", len(jwtSecret))
 		if jwtSecret == "" {
-			log.Println("Error: SUPABASE_JWT_SECRET environment variable is not set.")
+			log.Println("Error: JWT_SECRET environment variable is not set.")
 			writeJSONError(w, http.StatusInternalServerError, "Server configuration error: JWT secret missing")
 			return
 		}
 
 		// JWTの検証とパース
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenString, &CustomJWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 			// アルゴリズムがHMACであることを確認
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				log.Printf("AuthMiddleware Error: Unexpected signing method: %v", token.Header["alg"])
@@ -90,23 +104,23 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// トークンのクレームを取得
-		claims, ok := token.Claims.(jwt.MapClaims)
+		claims, ok := token.Claims.(*CustomJWTClaims)
 		if !ok {
 			log.Printf("AuthMiddleware Error: Invalid token claims")
 			writeJSONError(w, http.StatusUnauthorized, "Invalid token claims")
 			return
 		}
 
-		// SupabaseのJWTは通常、ユーザーIDを 'sub' (Subject) クレームにUUIDとして格納します。
-		userID, ok := claims["sub"].(string)
-		if !ok {
-			log.Printf("AuthMiddleware Error: JWT claims missing 'sub' (userID) or wrong type: %v", claims["sub"])
+		// ユーザーIDを取得
+		userID := claims.UserID
+		if userID == "" {
+			log.Printf("AuthMiddleware Error: JWT claims missing user_id")
 			writeJSONError(w, http.StatusUnauthorized, "Invalid token: missing user ID")
 			return
 		}
 
-		log.Printf("AuthMiddleware Debug: Successfully authenticated user: %s", userID)
-		// 6. ユーザーIDをContextに設定して次のハンドラに渡す
+		log.Printf("AuthMiddleware Debug: Successfully authenticated user: %s (GitHub: %s)", userID, claims.Login)
+		// ユーザーIDをContextに設定して次のハンドラに渡す
 		ctx := context.WithValue(r.Context(), UserIDKey{}, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
