@@ -1,3 +1,10 @@
+-- 0. すべてのテーブルを削除（既存のテーブルがあれば）
+DROP TABLE IF EXISTS public.tetrimino_placements CASCADE;
+DROP TABLE IF EXISTS public.decks CASCADE;
+DROP TABLE IF EXISTS public.results CASCADE;
+DROP TABLE IF EXISTS public.contribution_data CASCADE;
+DROP TABLE IF EXISTS public.users CASCADE;
+
 -- 1. UUID生成機能の有効化 (標準Postgresでgen_random_uuidを使うため)
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -10,6 +17,7 @@ CREATE TABLE public.users (
   github_id text,
   icon_url text,
   user_name text,
+  github_access_token text,
   CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
