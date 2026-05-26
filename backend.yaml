@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitris-backend-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: gitris-backend
+  template:
+    metadata:
+      labels:
+        app: gitris-backend
+    spec:
+      containers:
+      - name: gitris-backend-container
+        image: gitris-backend:latest # ローカルでビルドしたイメージ名
+        imagePullPolicy: Never # ローカルイメージを使用するための設定
+        ports:
+        - containerPort: 8080
+        # AWS認証情報やトークン情報を環境変数として渡す
+        env:
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitris-backend-service # これがコンテナ間通信のドメイン名になります
+spec:
+  type: LoadBalancer
+  selector:
+    app: gitris-backend
+  ports:
+    - protocol: TCP
+      port: 8080        # フロントからアクセスされるポート
+      targetPort: 8080  # コンテナの中のポート
