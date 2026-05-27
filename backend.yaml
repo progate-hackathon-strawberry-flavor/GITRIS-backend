@@ -16,7 +16,7 @@ spec:
       containers:
       - name: gitris-backend-container
         # ECRのURIに置換
-        image: 678780125373.dkr.ecr.ap-northeast-1.amazonaws.com/gitris-backend:latest
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-northeast-1.amazonaws.com/gitris-backend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
