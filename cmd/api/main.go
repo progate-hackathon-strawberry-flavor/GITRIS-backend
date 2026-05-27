@@ -90,28 +90,6 @@ func main() {
 	defer databaseService.DB.Close() // アプリケーション終了時にデータベース接続を閉じる
 	fmt.Println("データベース接続が正常に確立されました。")
 
-	// 起動時に初期スキーマSQLを適用
-	migrationPath := os.Getenv("DB_MIGRATION_FILE")
-	if migrationPath == "" {
-		migrationPath = "migrations/001_initial_schema.sql"
-	}
-
-	migrationCandidates := []string{migrationPath, "../../" + migrationPath}
-	applied := false
-	for _, candidate := range migrationCandidates {
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			if err := databaseService.ApplySQLFile(candidate); err != nil {
-				log.Fatalf("SQLマイグレーション適用に失敗しました: %v", err)
-			}
-			applied = true
-			break
-		}
-	}
-
-	if !applied {
-		log.Fatalf("SQLマイグレーションファイルが見つかりません。DB_MIGRATION_FILE または migrations/001_initial_schema.sql を確認してください")
-	}
-
 	// ユーザーリポジトリの初期化
 	userRepo := database.NewUserRepository(databaseService.DB)
 
