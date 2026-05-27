@@ -12,24 +12,43 @@ spec:
       labels:
         app: gitris-backend
     spec:
+      serviceAccountName: gitris-backend-sa  # IRSAでAWS認証を行う
       containers:
       - name: gitris-backend-container
-        image: gitris-backend:latest # ローカルでビルドしたイメージ名
-        imagePullPolicy: Never # ローカルイメージを使用するための設定
+        # ECRのURIに置換
+        image: 678780125373.dkr.ecr.ap-northeast-1.amazonaws.com/gitris-backend:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
-        # AWS認証情報やトークン情報を環境変数として渡す
         env:
+        - name: AWS_DEFAULT_REGION
+          value: "ap-northeast-1"
+        # Kubernetes Secret から注入
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: gitris-backend-secrets
+              key: github_client_id
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gitris-backend-secrets
+              key: github_client_secret
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gitris-backend-secrets
+              key: jwt_secret
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gitris-backend-service # これがコンテナ間通信のドメイン名になります
+  name: gitris-backend-service
 spec:
   type: LoadBalancer
   selector:
     app: gitris-backend
   ports:
     - protocol: TCP
-      port: 8080        # フロントからアクセスされるポート
-      targetPort: 8080  # コンテナの中のポート
+      port: 8080
+      targetPort: 8080
