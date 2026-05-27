@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQLドライバー
@@ -76,27 +74,6 @@ func (s *DatabaseService) GetGitHubAccessToken(userID string) (string, error) {
 	}
 	log.Printf("DatabaseService Info: ユーザーID %s のGitHub Access Tokenを取得しました。", userID)
 	return accessToken, nil
-}
-
-// ApplySQLFile reads a SQL file and executes it against the current database.
-func (s *DatabaseService) ApplySQLFile(sqlFilePath string) error {
-	sqlBytes, err := os.ReadFile(sqlFilePath)
-	if err != nil {
-		return fmt.Errorf("SQLファイルの読み込みに失敗しました (%s): %w", sqlFilePath, err)
-	}
-
-	script := strings.TrimSpace(string(sqlBytes))
-	if script == "" {
-		log.Printf("DatabaseService Info: SQLファイルが空のため適用をスキップします: %s", sqlFilePath)
-		return nil
-	}
-
-	if _, err := s.DB.Exec(script); err != nil {
-		return fmt.Errorf("SQLファイルの適用に失敗しました (%s): %w", sqlFilePath, err)
-	}
-
-	log.Printf("DatabaseService Info: SQLファイルを適用しました: %s", sqlFilePath)
-	return nil
 }
 
 // GetContributionsByUserID retrieves all contributions for a specific user from the database.
