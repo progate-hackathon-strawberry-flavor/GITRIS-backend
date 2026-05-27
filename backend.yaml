@@ -39,6 +39,12 @@ spec:
             secretKeyRef:
               name: gitris-backend-secrets
               key: jwt_secret
+        - name: CORS_ALLOWED_ORIGINS
+          valueFrom:
+            secretKeyRef:
+              name: gitris-backend-secrets
+              key: cors_allowed_origins
+              optional: true
 ---
 apiVersion: v1
 kind: Service
