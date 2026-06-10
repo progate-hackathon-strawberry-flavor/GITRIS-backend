@@ -16,7 +16,6 @@ import (
 	auth "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/api/middleware"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/github"
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
 	deck "github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/deck"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services/tetris"
 )
@@ -32,52 +31,25 @@ func main() {
 		}
 	}
 
-	// AWS Secrets Manager クライアントを初期化
-	secretsMgr, err := services.NewSecretsManagerClient(ctx)
-	if err != nil {
-		log.Fatalf("Failed to initialize Secrets Manager: %v", err)
-	}
-	defer secretsMgr.Close()
+	// 環境変数からデータベース接続情報を取得 (ESOがKubernetes Secretとして注入)
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbUser := os.Getenv("DB_USERNAME")
+	dbPass := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
 
-	// Secrets Manager から JWT秘密鍵を取得
-	jwtSecret, err := secretsMgr.GetJWTSecret(ctx, "gitris/jwt-secret")
-	if err != nil {
-		log.Printf("Warning: Could not retrieve JWT secret from Secrets Manager, falling back to environment variable: %v", err)
-		// Fallback to environment variable
-		if os.Getenv("JWT_SECRET") == "" {
-			log.Fatal("JWT_SECRET must be set in environment or Secrets Manager")
-		}
+	var databaseURL string
+	if dbHost != "" && dbPort != "" && dbUser != "" && dbPass != "" && dbName != "" {
+		databaseURL = fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=require", dbUser, dbPass, dbHost, dbPort, dbName)
 	} else {
-		// Override with Secrets Manager value
-		os.Setenv("JWT_SECRET", jwtSecret.Secret)
-		log.Println("JWT secret loaded from Secrets Manager")
+		databaseURL = os.Getenv("DATABASE_URL")
 	}
-
-	// Secrets Manager からデータベース認証情報を取得
-	dbSecret, err := secretsMgr.GetDatabaseSecret(ctx, "gitris/database")
-	if err != nil {
-		log.Printf("Warning: Could not retrieve database secret from Secrets Manager, falling back to environment variable: %v", err)
-		// Fallback to environment variable
-		if os.Getenv("DATABASE_URL") == "" {
-			log.Fatal("DATABASE_URL must be set in environment or Secrets Manager")
-		}
-	} else {
-		// Construct DATABASE_URL from secret
-		databaseURL := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=require",
-			dbSecret.Username,
-			dbSecret.Password,
-			dbSecret.Host,
-			dbSecret.Port,
-			dbSecret.DBName,
-		)
-		os.Setenv("DATABASE_URL", databaseURL)
-		log.Println("Database credentials loaded from Secrets Manager")
-	}
-
-	// データベースURLを環境変数から取得
-	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("エラー: DATABASE_URL 環境変数が設定されていません。")
+		log.Fatal("エラー: DB_HOST/DB_PORT/DB_USERNAME/DB_PASSWORD/DB_NAME または DATABASE_URL が設定されていません。")
+	}
+
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("JWT_SECRET が設定されていません。")
 	}
 
 	// サービス層の初期化
@@ -112,7 +84,7 @@ func main() {
 	gameHandler := api.NewGameHandler(sessionManager, databaseService) // ゲームハンドラの初期化
 	resultHandler := api.NewResultHandler(resultRepo)                  // ゲーム結果ハンドラの初期化
 	publicHandler := api.NewPublicHandler(databaseService)             // 公開ハンドラの初期化
-	oauthHandler := api.NewOAuthHandler(userRepo, secretsMgr)          // OAuth ハンドラの初期化（Aurora + Secrets Manager対応）
+	oauthHandler := api.NewOAuthHandler(userRepo)
 	// gorilla/mux ルーターの初期化
 	r := mux.NewRouter()
 

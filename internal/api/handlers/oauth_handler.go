@@ -9,20 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database"
-	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/services"
 )
 
 // GitHub Oathの認証を処理するハンドラー
 type OAuthHandler struct {
-	userRepo   *database.UserRepository
-	secretsMgr *services.SecretsManagerClient
+	userRepo *database.UserRepository
 }
 
 // 新しいOAuthHandlerを作成します。
-func NewOAuthHandler(userRepo *database.UserRepository, secretsMgr *services.SecretsManagerClient) *OAuthHandler {
+func NewOAuthHandler(userRepo *database.UserRepository) *OAuthHandler {
 	return &OAuthHandler{
-		userRepo:   userRepo,
-		secretsMgr: secretsMgr,
+		userRepo: userRepo,
 	}
 }
 
@@ -76,27 +73,7 @@ func (h *OAuthHandler) HandleOAuthCallback(w http.ResponseWriter, r *http.Reques
 
 	log.Printf("Processing OAuth callback with code: %s...", req.Code[:20])
 
-	// ここでSecrets ManagerからGitHub OAuthのクレデンシャルを取得します
-	githubSecret, err := h.secretsMgr.GetGitHubOAuthSecret(ctx, "gitris/github-oauth")
-	if err != nil {
-		log.Printf("Error retrieving GitHub credentials from Secrets Manager: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(OAuth2CallbackResponse{
-			Success: false,
-			Error:   "Failed to retrieve credentials",
-		})
-		return
-	}
-
-	tempHandler := &struct {
-		clientID     string
-		clientSecret string
-	}{
-		clientID:     githubSecret.ClientID,
-		clientSecret: githubSecret.ClientSecret,
-	}
-
-	accessToken, err := exchangeCodeForTokenWithCreds(req.Code, tempHandler.clientID, tempHandler.clientSecret)
+	accessToken, err := ExchangeCodeForToken(req.Code)
 	if err != nil {
 		log.Printf("Error exchanging code for token: %v", err)
 		w.WriteHeader(http.StatusUnauthorized)
