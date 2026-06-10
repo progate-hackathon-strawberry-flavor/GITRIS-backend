@@ -1,0 +1,89 @@
+name: Deploy to ECR
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest
+
+      - name: Build and push image to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: GITRIS-gitops
+
+      - name: Checkout gitops repo
+        uses: actions/checkout@v4
+        with:
+          repository: progate-hackathon-strawberry-flavor/GITRIS-gitops
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
+
+      - name: Update image tag
+        run: yq e '.backend.tag = "sha-${{ github.sha }}"' -i gitops/chart/values.yaml
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+          branch: update-backend-${{ github.sha }}
+          commit-message: "chore: update backend image to ${{ github.sha }}"
+          title: "chore: update backend image to ${{ github.sha }}"
+          body: |
+            ## Summary
+            - ECR image: `gitris-backend:${{ github.sha }}`
+            - Triggered by: ${{ github.repository }}@${{ github.ref_name }}
+          base: main
