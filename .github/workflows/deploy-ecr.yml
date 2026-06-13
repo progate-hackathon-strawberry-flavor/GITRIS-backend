@@ -71,7 +71,7 @@ jobs:
       - name: Update image tag
         uses: mikefarah/yq@bbdd97482f2d439126582a59689eb1c855944955 # v4.44.3
         with:
-          cmd: yq e '.backend.tag = "sha-${{ github.sha }}"' -i gitops/chart/values.yaml
+          cmd: yq e '.tag = "sha-${{ github.sha }}"' -i gitops/chart/backend/values.yaml
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
