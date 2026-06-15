@@ -89,6 +89,17 @@ func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// セッションが存在するPodのcookieをセット（Player BがこのPodを見つけるためのリトライ用）
+	http.SetCookie(w, &http.Cookie{
+		Name:     "GITRIS_ROOM_POD",
+		Value:    passcode,
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: false,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   false,
+	})
+
 	WriteJSONResponse(w, http.StatusOK, session)
 }
 
@@ -359,6 +370,19 @@ func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Printf("[GameHandler] User %s successfully matched with passcode %s (session: %s)", userID, passcode, sessionID)
+
+	// ALB app_cookie スティッキーセッション用クッキーをセット
+	// cookie値にpasscodeを使うことで、同じroomのリクエストが同じPodへルーティングされる
+	http.SetCookie(w, &http.Cookie{
+		Name:     "GITRIS_ROOM_POD",
+		Value:    passcode,
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: false,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   false,
+	})
+
 	WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success":        true,
 		"message":        message,
