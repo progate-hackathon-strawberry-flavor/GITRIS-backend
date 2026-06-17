@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -90,6 +91,7 @@ func main() {
 
 	// これにより、すべてのリクエストがまずCORSハンドラを通過するようになります。
 	r.Use(auth.CORSHandler())
+	r.Use(stickySessionMiddleware)
 
 	// 静的ファイル配信（テスト用）
 	r.HandleFunc("/test_websocket_client.html", func(w http.ResponseWriter, r *http.Request) {
@@ -195,4 +197,25 @@ func main() {
 	}
 
 	log.Println("サーバーが正常にシャットダウンされました。")
+}
+
+// GITRIS_ROOM_POD クッキーをレスポンスにechoする
+func stickySessionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("GITRIS_ROOM_POD")
+		isGameEndpoint := strings.Contains(r.URL.Path, "/status") ||
+			strings.Contains(r.URL.Path, "/join")
+		if err == nil && !isGameEndpoint {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "GITRIS_ROOM_POD",
+				Value:    cookie.Value,
+				Path:     "/",
+				MaxAge:   86400,
+				HttpOnly: false,
+				SameSite: http.SameSiteNoneMode,
+				Secure:   true,
+			})
+		}
+		next.ServeHTTP(w, r)
+	})
 }
