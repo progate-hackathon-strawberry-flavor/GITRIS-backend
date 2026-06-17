@@ -383,7 +383,7 @@ func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request)
 	// cookie値にpasscodeを使うことで、同じroomのリクエストが同じPodへルーティングされる
 	http.SetCookie(w, &http.Cookie{
 		Name:     "GITRIS_ROOM_POD",
-		Value:    passcode,
+		Value:    url.QueryEscape(passcode),
 		Path:     "/",
 		MaxAge:   86400,
 		HttpOnly: false,
