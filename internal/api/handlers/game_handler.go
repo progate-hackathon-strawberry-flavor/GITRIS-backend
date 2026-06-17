@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"   // Added for os.Getenv
 	"time" // Added for time.Time
 
@@ -83,21 +84,28 @@ func (h *GameHandler) GetRoomStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[GetRoomStatus] passcode=%s from %s", passcode, r.RemoteAddr)
+
 	session, ok := h.sessionManager.GetGameSession(passcode)
 	if !ok {
+		log.Printf("[GetRoomStatus] passcode=%s NOT FOUND on this pod", passcode)
 		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは見つかりませんでした")
 		return
 	}
 
+	log.Printf("[GetRoomStatus] passcode=%s FOUND, status=%s player1=%v player2=%v",
+		passcode, session.Status,
+		session.Player1 != nil, session.Player2 != nil)
+
 	// セッションが存在するPodのcookieをセット（Player BがこのPodを見つけるためのリトライ用）
 	http.SetCookie(w, &http.Cookie{
 		Name:     "GITRIS_ROOM_POD",
-		Value:    passcode,
+		Value:    url.QueryEscape(passcode),
 		Path:     "/",
 		MaxAge:   86400,
 		HttpOnly: false,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   false,
+		SameSite: http.SameSiteNoneMode,
+		Secure:   true,
 	})
 
 	WriteJSONResponse(w, http.StatusOK, session)
