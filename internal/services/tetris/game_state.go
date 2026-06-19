@@ -24,6 +24,7 @@ type DeckPlacementPiece struct {
 // これはゲームセッション内で個々のプレイヤーの進行を管理するために使われます。
 type PlayerGameState struct {
 	UserID        string             `json:"user_id"`
+	IsStub        bool               `json:"-"`              // 他Podのプレイヤーを示すスタブ（ゲームデータなし）
 	Board         tetris.Board       `json:"board"`          // 現在のゲームボード
 	CurrentPiece  *tetris.Piece      `json:"current_piece"`  // 現在操作中のテトリミノ
 	NextPiece     *tetris.Piece      `json:"next_piece"`     // 次に出現するテトリミノ
