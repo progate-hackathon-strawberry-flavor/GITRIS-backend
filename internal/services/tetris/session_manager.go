@@ -1,6 +1,7 @@
 package tetris
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket" // WebSocketライブラリのインポート
+	"github.com/redis/go-redis/v9"
 
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/database" // データベースサービスをインポート
 	"github.com/progate-hackathon-strawberry-flavor/GITRIS-backend/internal/models"
@@ -29,11 +31,11 @@ type Client struct {
 func (c *Client) SafeSend(message []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.closed {
 		return false // 既に閉じられている
 	}
-	
+
 	select {
 	case c.Send <- message:
 		return true // 送信成功
@@ -46,7 +48,7 @@ func (c *Client) SafeSend(message []byte) bool {
 func (c *Client) SafeClose() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if !c.closed {
 		close(c.Send)
 		c.closed = true
@@ -56,73 +58,89 @@ func (c *Client) SafeClose() {
 // LightweightGameState はWebSocket送信用の軽量なゲーム状態構造体です。
 // GameSessionの全情報ではなく、クライアントが必要とする最小限の情報のみを含みます。
 type LightweightGameState struct {
-	ID             string                    `json:"id"`
-	Player1        *LightweightPlayerState   `json:"player1"`
-	Player2        *LightweightPlayerState   `json:"player2"`
-	Status         string                    `json:"status"`
-	StartedAt      time.Time                 `json:"started_at,omitempty"`
-	EndedAt        time.Time                 `json:"ended_at,omitempty"`
-	TimeLimit      int                       `json:"time_limit"`       // 制限時間（秒）
-	RemainingTime  int                       `json:"remaining_time"`   // 残り時間（秒）
+	ID            string                  `json:"id"`
+	Player1       *LightweightPlayerState `json:"player1"`
+	Player2       *LightweightPlayerState `json:"player2"`
+	Status        string                  `json:"status"`
+	StartedAt     time.Time               `json:"started_at,omitempty"`
+	EndedAt       time.Time               `json:"ended_at,omitempty"`
+	TimeLimit     int                     `json:"time_limit"`     // 制限時間（秒）
+	RemainingTime int                     `json:"remaining_time"` // 残り時間（秒）
 }
 
 // LightweightPlayerState はプレイヤー状態の軽量版です。
 type LightweightPlayerState struct {
-	UserID             string             `json:"user_id"`
-	Board              tetris.Board       `json:"board"`
-	CurrentPiece       *tetris.Piece      `json:"current_piece"`
-	NextPiece          *tetris.Piece      `json:"next_piece"`
-	HeldPiece          *tetris.Piece      `json:"held_piece,omitempty"`
-	Score              int                `json:"score"`
-	LinesCleared       int                `json:"lines_cleared"`
-	Level              int                `json:"level"`
-	IsGameOver         bool               `json:"is_game_over"`
-	ContributionScores map[string]int     `json:"contribution_scores"`
-	CurrentPieceScores map[string]int     `json:"current_piece_scores"`
+	UserID             string         `json:"user_id"`
+	Board              tetris.Board   `json:"board"`
+	CurrentPiece       *tetris.Piece  `json:"current_piece"`
+	NextPiece          *tetris.Piece  `json:"next_piece"`
+	HeldPiece          *tetris.Piece  `json:"held_piece,omitempty"`
+	Score              int            `json:"score"`
+	LinesCleared       int            `json:"lines_cleared"`
+	Level              int            `json:"level"`
+	IsGameOver         bool           `json:"is_game_over"`
+	ContributionScores map[string]int `json:"contribution_scores"`
+	CurrentPieceScores map[string]int `json:"current_piece_scores"`
 }
 
 // SessionManager はゲームセッションとWebSocketクライアント接続の全体を管理します。
 // これはアプリケーション内でシングルトンとして動作することが想定されます。
 type SessionManager struct {
-	sessions    map[string]*GameSession // 合言葉 -> GameSession のマップ (アクティブなゲームセッションを保持)
-	clients     map[string]*Client             // userID -> Client のマップ (現在接続中の全WebSocketクライアント)
-	register    chan *Client                   // 新しいクライアント接続の登録リクエスト用チャネル
-	unregister  chan *Client                   // クライアント切断の登録解除リクエスト用チャネル
-	broadcast   chan *GameStateEvent          // ゲーム状態の更新をブロードキャストするためのチャネル
-	inputEvents chan PlayerInputEvent         // クライアントからのプレイヤー操作入力を受け取るチャネル
-	quit        chan struct{}                  // シャットダウン用チャネル
-	mu          sync.RWMutex                   // sessions と clients マップへのアクセスを保護するためのRWMutex
-	dbService   *database.DatabaseService      // データベース操作のためのサービス
-	deckRepo    database.DeckRepository        // デッキリポジトリ（テトリミノ配置データ取得用）
-	resultRepo database.ResultRepository       // ゲーム結果リポジトリ（スコア保存用）
-	lastBroadcast map[string]time.Time          // ルームごとの最後のブロードキャスト時刻
-	broadcastMu   sync.Mutex                    // lastBroadcastマップへのアクセス保護用
+	sessions      map[string]*GameSession   // 合言葉 -> GameSession のマップ (アクティブなゲームセッションを保持)
+	clients       map[string]*Client        // userID -> Client のマップ (現在接続中の全WebSocketクライアント)
+	register      chan *Client              // 新しいクライアント接続の登録リクエスト用チャネル
+	unregister    chan *Client              // クライアント切断の登録解除リクエスト用チャネル
+	broadcast     chan *GameStateEvent      // ゲーム状態の更新をブロードキャストするためのチャネル
+	inputEvents   chan PlayerInputEvent     // クライアントからのプレイヤー操作入力を受け取るチャネル
+	quit          chan struct{}             // シャットダウン用チャネル
+	mu            sync.RWMutex              // sessions と clients マップへのアクセスを保護するためのRWMutex
+	dbService     *database.DatabaseService // データベース操作のためのサービス
+	deckRepo      database.DeckRepository   // デッキリポジトリ（テトリミノ配置データ取得用）
+	resultRepo    database.ResultRepository // ゲーム結果リポジトリ（スコア保存用）
+	lastBroadcast map[string]time.Time      // ルームごとの最後のブロードキャスト時刻
+	broadcastMu   sync.Mutex                // lastBroadcastマップへのアクセス保護用
+
+	// Redis関連フィールド（nilの場合はRedis無効・既存のインメモリ動作）
+	redisClient    *redis.Client
+	remoteStates   map[string]*LightweightPlayerState // "passcode:playerSlot" -> 他Podのプレイヤー状態
+	remoteStatesMu sync.RWMutex
+	pubsubCancels  map[string]context.CancelFunc // passcode -> Pub/Sub購読のキャンセル関数
+	pubsubMu       sync.Mutex
+	remoteReady    map[string]bool // "passcode:playerSlot" -> 他PodでWebSocket接続済みか
+	remoteReadyMu  sync.Mutex
 }
 
 // NewSessionManager は新しい SessionManager インスタンスを作成し、そのメインイベントループをバックグラウンドで開始します。
 //
 // Parameters:
-//   db : データベースサービスへのポインタ
-//   deckRepo : デッキリポジトリ
-//   resultRepo : ゲーム結果リポジトリ
+//
+//	db : データベースサービスへのポインタ
+//	deckRepo : デッキリポジトリ
+//	resultRepo : ゲーム結果リポジトリ
+//
 // Returns:
-//   *SessionManager: 初期化されたセッションマネージャーのポインタ
-func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository, resultRepo database.ResultRepository) *SessionManager {
+//
+//	*SessionManager: 初期化されたセッションマネージャーのポインタ
+func NewSessionManager(db *database.DatabaseService, deckRepo database.DeckRepository, resultRepo database.ResultRepository, redisClient *redis.Client) *SessionManager {
 	sm := &SessionManager{
-		sessions:    make(map[string]*GameSession),
-		clients:     make(map[string]*Client),
-		register:    make(chan *Client),
-		unregister:  make(chan *Client),
-		broadcast:   make(chan *GameStateEvent, 512),   // ゲーム状態更新の頻度を考慮し、大きめのバッファ
-		inputEvents: make(chan PlayerInputEvent, 512), // プレイヤー操作のキューイング用
-		quit:        make(chan struct{}),
-		dbService:  db,
-		deckRepo:   deckRepo,
-		resultRepo: resultRepo,
+		sessions:      make(map[string]*GameSession),
+		clients:       make(map[string]*Client),
+		register:      make(chan *Client),
+		unregister:    make(chan *Client),
+		broadcast:     make(chan *GameStateEvent, 512),
+		inputEvents:   make(chan PlayerInputEvent, 512),
+		quit:          make(chan struct{}),
+		dbService:     db,
+		deckRepo:      deckRepo,
+		resultRepo:    resultRepo,
 		lastBroadcast: make(map[string]time.Time),
-		broadcastMu: sync.Mutex{},
+		broadcastMu:   sync.Mutex{},
+		redisClient:   redisClient,
+		remoteStates:  make(map[string]*LightweightPlayerState),
+		pubsubCancels: make(map[string]context.CancelFunc),
+		remoteReady:   make(map[string]bool),
 	}
-	go sm.Run() // SessionManager のメインイベントループをゴルーチンで開始
+	go sm.Run()
 	return sm
 }
 
@@ -185,11 +203,11 @@ func (sm *SessionManager) Run() {
 			sm.mu.RLock()
 			client, clientExists := sm.clients[event.UserID]
 			sm.mu.RUnlock()
-			
+
 			if !clientExists {
 				continue
 			}
-			
+
 			sm.mu.RLock()
 			session, ok := sm.sessions[client.RoomID]
 			sm.mu.RUnlock()
@@ -219,7 +237,7 @@ func (sm *SessionManager) Run() {
 				go func(userID, passcode string) {
 					sm.BroadcastToSpecificClient(userID, passcode)
 				}(event.UserID, session.ID)
-				
+
 				// 相手への更新は1秒間隔のブロードキャストに任せる（負荷軽減）
 				// （自動落下タイマーでブロードキャストされるため、ここでは相手への送信は不要）
 
@@ -252,11 +270,11 @@ func (sm *SessionManager) Run() {
 				}
 
 				// プレイヤー1の自動落下
-				if session.Player1 != nil && !session.Player1.IsGameOver {
+				if session.Player1 != nil && !session.Player1.IsStub && !session.Player1.IsGameOver {
 					AutoFall(session.Player1)
 				}
 				// プレイヤー2の自動落下
-				if session.Player2 != nil && !session.Player2.IsGameOver {
+				if session.Player2 != nil && !session.Player2.IsStub && !session.Player2.IsGameOver {
 					AutoFall(session.Player2)
 				}
 
@@ -266,8 +284,8 @@ func (sm *SessionManager) Run() {
 				}(session.ID)
 
 				// ゲームオーバー判定 - 両方のプレイヤーがゲームオーバーした場合のみ終了
-				if session.Player1 != nil && session.Player2 != nil && 
-				   session.Player1.IsGameOver && session.Player2.IsGameOver {
+				if session.Player1 != nil && session.Player2 != nil &&
+					session.Player1.IsGameOver && session.Player2.IsGameOver {
 					// 両プレイヤーがゲームオーバーした場合のみセッション終了
 					go func(sessionID string) {
 						time.Sleep(2 * time.Second)
@@ -287,6 +305,23 @@ func (sm *SessionManager) Run() {
 
 			// GameSessionを軽量な構造体に変換してからJSON形式でシリアライズ
 			lightweightState := session.ToLightweight()
+
+			// Redis有効時: 他Podのプレイヤー状態を補完（スタブも置換対象）
+			if sm.redisClient != nil {
+				sm.remoteStatesMu.RLock()
+				if lightweightState.Player1 == nil || (session.Player1 != nil && session.Player1.IsStub) {
+					if remote, exists := sm.remoteStates[event.RoomID+":player1"]; exists {
+						lightweightState.Player1 = remote
+					}
+				}
+				if lightweightState.Player2 == nil || (session.Player2 != nil && session.Player2.IsStub) {
+					if remote, exists := sm.remoteStates[event.RoomID+":player2"]; exists {
+						lightweightState.Player2 = remote
+					}
+				}
+				sm.remoteStatesMu.RUnlock()
+			}
+
 			stateJSON, err := json.Marshal(lightweightState)
 			if err != nil {
 				sm.mu.RUnlock()
@@ -302,7 +337,7 @@ func (sm *SessionManager) Run() {
 				}
 			}
 			sm.mu.RUnlock()
-		
+
 		case <-sm.quit:
 			// シャットダウンシグナルを受信したらメインループを終了
 			return
@@ -313,35 +348,32 @@ func (sm *SessionManager) Run() {
 // CheckAndStartGame はセッションが開始条件を満たしているかチェックし、満たしていればゲームを開始します。
 //
 // Parameters:
-//   passcode : チェックする合言葉
+//
+//	passcode : チェックする合言葉
 func (sm *SessionManager) CheckAndStartGame(passcode string) {
-	
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock() // defer で必ずアンロックされるように変更
 
-
-	
 	session, ok := sm.sessions[passcode]
 	if !ok {
 		return // セッションが存在しない
 	}
-	
+
 	// セッションの状態をチェック（削除された可能性を考慮）
 	if session == nil {
 		return
 	}
-	
-	
-	// 各条件をチェック
-	hasPlayer1 := session.Player1 != nil
-	hasPlayer2 := session.Player2 != nil
-	
-	
+
+	// スタブ（他Podのプレイヤーの仮置き）は「存在しない」として扱う
+	hasPlayer1 := session.Player1 != nil && !session.Player1.IsStub
+	hasPlayer2 := session.Player2 != nil && !session.Player2.IsStub
+
 	if hasPlayer1 {
 	}
 	if hasPlayer2 {
 	}
-	
+
 	// WebSocket接続をチェック
 	var player1Connected, player2Connected bool
 	if hasPlayer1 {
@@ -350,18 +382,34 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 	if hasPlayer2 {
 		player2Connected = sm.clients[session.Player2.UserID] != nil
 	}
-	
+
 	isWaiting := session.Status == "waiting"
 
-	// 2人のプレイヤーが揃っていて、両方がWebSocketに接続済みであればゲーム開始
-	if hasPlayer1 && hasPlayer2 && player1Connected && player2Connected && isWaiting {
-		
+	// リモートプレイヤーの準備状態を確認（他PodのWebSocket接続）
+	sm.remoteReadyMu.Lock()
+	remotePlayer2Ready := sm.remoteReady[passcode+":player2"]
+	remotePlayer1Ready := sm.remoteReady[passcode+":player1"]
+	sm.remoteReadyMu.Unlock()
+
+	// ゲーム開始条件:
+	// ケース1: 同一Pod（両プレイヤーがローカルに接続済み）
+	// ケース2: 別Pod（ローカルPlayer1 + リモートPlayer2 ready）
+	shouldStart := (hasPlayer1 && hasPlayer2 && player1Connected && player2Connected) ||
+		(hasPlayer1 && player1Connected && !hasPlayer2 && remotePlayer2Ready) ||
+		(hasPlayer2 && player2Connected && !hasPlayer1 && remotePlayer1Ready)
+
+	if shouldStart && isWaiting {
 		session.Status = "playing"
 		session.StartedAt = time.Now()
+		sm.resetBroadcastThrottle(passcode)
 
-		// ゲーム開始をクライアントに通知（非同期実行）
+		// Player1がいるPodがゲーム開始シグナルを発行（マスターPod）
+		if hasPlayer1 && sm.redisClient != nil {
+			go sm.publishMessage(passcode, RedisGameMessage{Type: "game_start"})
+		}
+
 		go func(passcode string) {
-			sm.BroadcastGameState(passcode) 
+			sm.BroadcastGameState(passcode)
 		}(passcode)
 		return
 	}
@@ -370,11 +418,14 @@ func (sm *SessionManager) CheckAndStartGame(passcode string) {
 // RegisterClient は新しいWebSocketクライアントをSessionManagerに登録します。
 //
 // Parameters:
-//   passcode : クライアントが参加する合言葉
-//   userID : クライアントのユーザーID
-//   conn   : WebSocketコネクション
+//
+//	passcode : クライアントが参加する合言葉
+//	userID : クライアントのユーザーID
+//	conn   : WebSocketコネクション
+//
 // Returns:
-//   error: エラーが発生した場合
+//
+//	error: エラーが発生した場合
 func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocket.Conn) error {
 
 	// 既存の接続があれば状況に応じてクリーンアップ
@@ -397,9 +448,9 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 		UserID: userID,
 		Conn:   conn,
 		Send:   make(chan []byte, 512), // バッファサイズをさらに増加
-		RoomID: passcode, // 合言葉をRoomIDフィールドに格納
+		RoomID: passcode,               // 合言葉をRoomIDフィールドに格納
 	}
-	
+
 	// 同一ユーザーの複数接続許可が有効な場合は、常に新しい接続を登録
 	// （既存接続は上の処理で保持されている）
 	if os.Getenv("ALLOW_SAME_USER_JOIN") == "true" {
@@ -415,8 +466,8 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 	sm.mu.Unlock()
 
 	// WebSocket接続の基本設定（パフォーマンス最適化）
-	conn.SetReadLimit(2048)                                    // 読み取り制限を2KBに増加
-	conn.SetReadDeadline(time.Now().Add(300 * time.Second))    // 5分のタイムアウト
+	conn.SetReadLimit(2048)                                 // 読み取り制限を2KBに増加
+	conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // 5分のタイムアウト
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // Pong受信時にタイムアウトリセット
 		return nil
@@ -429,6 +480,19 @@ func (sm *SessionManager) RegisterClient(passcode, userID string, conn *websocke
 	// クライアント登録イベントを SessionManager に送信
 	sm.register <- client
 
+	// Redis Pub/Sub を開始してプレイヤー接続を通知
+	if sm.redisClient != nil {
+		playerSlot := sm.getLocalPlayerSlot(passcode, userID)
+		if playerSlot != "" {
+			sm.subscribeToRoom(passcode)
+			sm.publishMessage(passcode, RedisGameMessage{
+				Type:       "player_ready",
+				PlayerSlot: playerSlot,
+				UserID:     userID,
+			})
+		}
+	}
+
 	return nil
 }
 
@@ -438,9 +502,9 @@ func (sm *SessionManager) readPump(client *Client) {
 		// パニック回復処理
 		if r := recover(); r != nil {
 		}
-		
+
 		// クライアントの切断処理（unregisterのみ実行、コネクション切断はwritePumpで処理）
-		
+
 		// unregister チャネルが閉じられていない場合のみ送信
 		select {
 		case sm.unregister <- client:
@@ -481,12 +545,12 @@ func (sm *SessionManager) readPump(client *Client) {
 			// 安全に終了（コネクション切断はwritePumpに任せる）
 			return
 		}
-		
+
 		// メッセージサイズチェック
 		if len(message) == 0 {
 			continue
 		}
-		
+
 		// ログ出力を削減（パフォーマンス改善）
 
 		// 受信したJSONメッセージを PlayerInputEvent 構造体にパース
@@ -514,7 +578,7 @@ func (c *Client) writePump() {
 		// パニック回復処理
 		if r := recover(); r != nil {
 		}
-		
+
 		// WebSocket接続を安全に閉じる（一度だけ実行されるように）
 		if c.Conn != nil {
 			if err := c.Conn.Close(); err != nil {
@@ -549,7 +613,7 @@ func (c *Client) writePump() {
 
 			// WebSocket書き込みタイムアウトを設定
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) // 短縮してレスポンシブに
-			
+
 			// Send チャネルからメッセージを受信
 			if !ok {
 				// マネージャーがチャネルを閉じた場合 (クライアントの登録解除時など)
@@ -561,16 +625,16 @@ func (c *Client) writePump() {
 			err := c.Conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
 				consecutiveErrors++
-				
+
 				if consecutiveErrors >= maxConsecutiveErrors {
 					return
 				}
 				continue
 			}
-			
+
 			// 送信成功時はエラーカウンターをリセット
 			consecutiveErrors = 0
-			
+
 		case <-ticker.C:
 			// 接続状態チェック
 			if c.Conn == nil {
@@ -589,8 +653,9 @@ func (c *Client) writePump() {
 // BroadcastToSpecificClient は指定されたクライアントにのみゲーム状態を送信します（自分の操作の即座反映用）
 //
 // Parameters:
-//   userID : 送信対象のユーザーID
-//   passcode : 合言葉
+//
+//	userID : 送信対象のユーザーID
+//	passcode : 合言葉
 func (sm *SessionManager) BroadcastToSpecificClient(userID, passcode string) {
 	sm.mu.RLock()
 	session, ok := sm.sessions[passcode]
@@ -598,7 +663,7 @@ func (sm *SessionManager) BroadcastToSpecificClient(userID, passcode string) {
 		sm.mu.RUnlock()
 		return
 	}
-	
+
 	client, clientOk := sm.clients[userID]
 	if !clientOk {
 		sm.mu.RUnlock()
@@ -623,24 +688,25 @@ func (sm *SessionManager) BroadcastToSpecificClient(userID, passcode string) {
 // そのセッションに参加している全てのクライアントに WebSocket でブロードキャストします。
 //
 // Parameters:
-//   passcode : ブロードキャスト対象の合言葉
+//
+//	passcode : ブロードキャスト対象の合言葉
 func (sm *SessionManager) BroadcastGameState(passcode string) {
 	// ブロードキャストスロットリング：対戦相手の動きは1秒おきで十分
 	const minBroadcastInterval = 1000 * time.Millisecond // 1秒間隔（大幅負荷軽減）
-	
+
 	sm.broadcastMu.Lock()
 	lastTime, exists := sm.lastBroadcast[passcode]
 	now := time.Now()
-	
+
 	// 前回のブロードキャストから十分な時間が経過していない場合はスキップ
 	if exists && now.Sub(lastTime) < minBroadcastInterval {
 		sm.broadcastMu.Unlock()
 		return
 	}
-	
+
 	sm.lastBroadcast[passcode] = now
 	sm.broadcastMu.Unlock()
-	
+
 	// ログ出力を削減（パフォーマンス改善）
 	sm.mu.RLock()
 	session, ok := sm.sessions[passcode]
@@ -650,20 +716,32 @@ func (sm *SessionManager) BroadcastGameState(passcode string) {
 	}
 
 	// ゲーム状態更新イベントを SessionManager のブロードキャストチャネルに送信
-	// チャネルがフルの場合は最新の状態のみ保持（負荷軽減）
 	select {
 	case sm.broadcast <- &GameStateEvent{
-		RoomID: passcode, // 合言葉を使用
-		State:  session, // セッション全体の状態を送信
+		RoomID: passcode,
+		State:  session,
 	}:
 	default:
 	}
+
+	// Redis が有効な場合: ローカルプレイヤー状態を他Podに発行
+	if sm.redisClient != nil {
+		go sm.publishLocalPlayerState(passcode)
+	}
+}
+
+// resetBroadcastThrottle はルーム単位のブロードキャスト間隔制限を解除します。
+func (sm *SessionManager) resetBroadcastThrottle(passcode string) {
+	sm.broadcastMu.Lock()
+	delete(sm.lastBroadcast, passcode)
+	sm.broadcastMu.Unlock()
 }
 
 // EndGameSession はゲームセッションを終了させ、結果をデータベースに記録し、セッションをクリーンアップします。
 //
 // Parameters:
-//   passcode : 終了する合言葉
+//
+//	passcode : 終了する合言葉
 func (sm *SessionManager) EndGameSession(passcode string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -677,9 +755,9 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 		return // 既に終了済み
 	}
 
-	session.Status = "finished" // ステータスを「終了済み」に設定
+	session.Status = "finished"  // ステータスを「終了済み」に設定
 	session.EndedAt = time.Now() // 終了日時を記録
-	
+
 	// 終了理由を判定してログ出力
 	if session.IsTimeUp() {
 	} else if session.Player1 != nil && session.Player1.IsGameOver {
@@ -694,11 +772,14 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 	// mutexをアンロックしてからブロードキャスト（デッドロック回避）
 	sm.mu.Unlock()
 	sm.BroadcastGameState(passcode)
-	
+
 	// ゲーム終了の通知をクライアントが受信する時間を確保（3秒待機）
 	time.Sleep(3 * time.Second)
-	
+
 	sm.mu.Lock()
+
+	// Redis Pub/Sub購読をキャンセル
+	go sm.cancelRoomSubscription(passcode)
 
 	// セッションに関連するクライアントのクリーンアップ
 	var clientsToUnregister []*Client
@@ -717,6 +798,9 @@ func (sm *SessionManager) EndGameSession(passcode string) {
 
 	// セッションマネージャーのマップからセッションを削除
 	delete(sm.sessions, passcode)
+
+	// Redis Pub/Sub購読をキャンセル
+	go sm.cancelRoomSubscription(passcode)
 }
 
 // GetGameSession は指定された合言葉のゲームセッションを取得します。
@@ -732,12 +816,12 @@ func (sm *SessionManager) GetGameSession(passcode string) (*GameSession, bool) {
 func (sm *SessionManager) DeleteSession(passcode string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	session, exists := sm.sessions[passcode]
 	if !exists {
 		return fmt.Errorf("passcode %s のセッションは見つかりませんでした", passcode)
 	}
-	
+
 	// セッションに接続されているクライアントをすべて切断
 	if session.Player1 != nil {
 		if client, ok := sm.clients[session.Player1.UserID]; ok {
@@ -745,26 +829,29 @@ func (sm *SessionManager) DeleteSession(passcode string) error {
 			delete(sm.clients, session.Player1.UserID)
 		}
 	}
-	
+
 	if session.Player2 != nil {
 		if client, ok := sm.clients[session.Player2.UserID]; ok {
 			client.SafeClose()
 			delete(sm.clients, session.Player2.UserID)
 		}
 	}
-	
+
 	// セッションをマップから削除
 	delete(sm.sessions, passcode)
-	
+
+	// Redis Pub/Sub購読をキャンセル
+	go sm.cancelRoomSubscription(passcode)
+
 	return nil
 }
 
 // Shutdown はSessionManagerを安全にシャットダウンします
 func (sm *SessionManager) Shutdown() {
-	
+
 	// quitチャネルを閉じてRunメソッドのメインループを終了
 	close(sm.quit)
-	
+
 	// 全クライアントを安全に切断
 	sm.mu.Lock()
 	for _, client := range sm.clients {
@@ -775,19 +862,18 @@ func (sm *SessionManager) Shutdown() {
 	}
 	// クライアントマップをクリア
 	sm.clients = make(map[string]*Client)
-	
+
 	// セッションマップをクリア
 	sm.sessions = make(map[string]*GameSession)
 	sm.mu.Unlock()
-	
-} 
+
+}
 
 // saveGameResultsToRanking はゲーム終了時に両プレイヤーのスコアをresultsテーブルに保存します
 func (sm *SessionManager) saveGameResultsToRanking(session *GameSession) {
 	if session == nil {
 		return
 	}
-
 
 	// プレイヤー1のスコアを保存
 	if session.Player1 != nil {
@@ -822,19 +908,49 @@ func (sm *SessionManager) savePlayerScore(userID string, score int, playerName s
 	return nil
 }
 
+// CreateSessionForHost はホストがルームを作成するために直接セッションを初期化します。
+// Redisの存在チェックを行わず、ローカルセッションを作成します。
+func (sm *SessionManager) CreateSessionForHost(passcode, playerID, deckID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if _, exists := sm.sessions[passcode]; exists {
+		return errors.New("このパスコードは既に使用されています")
+	}
+
+	var playerDeck *models.Deck
+	if deckID != "guest" && deckID != "" {
+		var err error
+		playerDeck, err = sm.dbService.GetDeckByID(deckID)
+		if err != nil {
+			return fmt.Errorf("failed to get player deck: %w", err)
+		}
+	}
+
+	newSession, err := NewGameSession(passcode, playerID, playerDeck, sm.deckRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create game session: %w", err)
+	}
+	sm.sessions[passcode] = newSession
+	return nil
+}
+
 // JoinRoomByPasscode は合言葉を使ってルームに参加します。
 // 合言葉のセッションが存在しない場合は新しく作成し、存在する場合は参加します。
 //
 // Parameters:
-//   passcode     : ユーザーが入力した合言葉
-//   playerID     : 参加するプレイヤーのユーザーID
-//   playerDeckID : プレイヤーが使用するデッキのUUID
+//
+//	passcode     : ユーザーが入力した合言葉
+//	playerID     : 参加するプレイヤーのユーザーID
+//	playerDeckID : プレイヤーが使用するデッキのUUID
+//
 // Returns:
-//   string: セッションID（合言葉と同じ）
-//   bool: 新しくセッションを作成したかどうか（true: 作成、false: 既存セッションに参加）
-//   error: エラーが発生した場合
+//
+//	string: セッションID（合言葉と同じ）
+//	bool: 新しくセッションを作成したかどうか（true: 作成、false: 既存セッションに参加）
+//	error: エラーが発生した場合
 func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID string) (string, bool, error) {
-	
+
 	// 合言葉のバリデーション
 	if passcode == "" {
 		return "", false, errors.New("合言葉が必要です")
@@ -842,71 +958,121 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 	if len(passcode) < 3 || len(passcode) > 20 {
 		return "", false, errors.New("合言葉は3文字以上20文字以下で入力してください")
 	}
-	
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	session, exists := sm.sessions[passcode]
-	
+
 	if !exists {
-		// セッションが存在しない場合、新しく作成（プレイヤー1として）
-		
-			// ゲストユーザーの場合はnilデッキを設定
-	var playerDeck *models.Deck
-	if playerDeckID == "guest" || playerDeckID == "" {
-		playerDeck = nil
-	} else {
-		// データベースからプレイヤーのデッキデータをロード
-		var err error
-		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
-		if err != nil {
-			return "", false, fmt.Errorf("failed to get player deck: %w", err)
+		// Redisでルームが既に存在するか確認（クロスポッドでPlayer2が参加するケース）
+		if sm.redisClient != nil {
+			roomData, redisErr := sm.getRoomFromRedis(passcode)
+			if redisErr == nil && len(roomData) > 0 && roomData["player1_id"] != "" {
+				// 別PodにPlayer1がいる → Player2として部分セッションを作成
+				var p2Deck *models.Deck
+				if playerDeckID != "guest" && playerDeckID != "" {
+					var deckErr error
+					p2Deck, deckErr = sm.dbService.GetDeckByID(playerDeckID)
+					if deckErr != nil {
+						return "", false, fmt.Errorf("failed to get player deck: %w", deckErr)
+					}
+				}
+				partialSession := &GameSession{
+					ID:           passcode,
+					Status:       "waiting",
+					TimeLimit:    GameTimeLimit,
+					InputCh:      make(chan PlayerInputEvent, 100),
+					OutputCh:     make(chan GameStateEvent, 100),
+					GameLoopDone: make(chan struct{}),
+				}
+				// Player1スタブをRedisのデータから即座に設定（status APIで即時見えるようにする）
+				if roomData["player1_id"] != "" {
+					partialSession.Player1 = &PlayerGameState{UserID: roomData["player1_id"], IsStub: true}
+				}
+				partialSession.SetPlayer2(playerID, p2Deck, sm.deckRepo)
+				sm.sessions[passcode] = partialSession
+
+				go func() {
+					sm.joinRoomInRedis(passcode, playerID)
+					sm.subscribeToRoom(passcode)
+					sm.publishMessage(passcode, RedisGameMessage{
+						Type:       "player_joined",
+						PlayerSlot: "player2",
+						UserID:     playerID,
+					})
+				}()
+
+				return passcode, false, nil
+			} else if redisErr == nil {
+				// Redisに接続できるがルームが存在しない → 無効なパスコード
+				return "", false, errors.New("ルームが見つかりません")
+			}
+			// Redis接続エラーの場合はフォールスルーしてローカル作成（縮退動作）
 		}
-	}
-		
-		// 新しいゲームセッションを初期化（IDは合言葉を使用）
+
+		// Redis無効またはRedisエラー時: 新しく作成（プレイヤー1として、後方互換）
+		var playerDeck *models.Deck
+		if playerDeckID == "guest" || playerDeckID == "" {
+			playerDeck = nil
+		} else {
+			var err error
+			playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to get player deck: %w", err)
+			}
+		}
+
 		newSession, err := NewGameSession(passcode, playerID, playerDeck, sm.deckRepo)
 		if err != nil {
 			return "", false, fmt.Errorf("failed to create game session: %w", err)
 		}
 		sm.sessions[passcode] = newSession
-		
+
 		return passcode, true, nil
-		
+
 	} else {
 		// セッションが存在する場合、プレイヤー2として参加
-		
+
 		if session.Status != "waiting" {
 			return "", false, errors.New("このルームは既にゲーム中または終了しています")
 		}
-		
+
 		if session.Player2 != nil {
 			return "", false, errors.New("このルームは既に満室です")
 		}
-		
-		// 開発・テスト用: 環境変数でこの制限を無効化可能
+
 		if os.Getenv("ALLOW_SAME_USER_JOIN") != "true" {
 			if session.Player1 != nil && session.Player1.UserID == playerID {
 				return "", false, errors.New("自分が作成したルームには参加できません")
 			}
-		} else {
 		}
 
-	
-	// ゲストユーザーの場合はnilデッキを設定
-	var playerDeck *models.Deck
-	if playerDeckID == "guest" || playerDeckID == "" {
-		playerDeck = nil
-	} else {
-		// データベースからプレイヤー2のデッキデータをロード
-		var err error
-		playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
-		if err != nil {
-			return "", false, fmt.Errorf("failed to get player2 deck: %w", err)
+		var playerDeck *models.Deck
+		if playerDeckID == "guest" || playerDeckID == "" {
+			playerDeck = nil
+		} else {
+			var err error
+			playerDeck, err = sm.dbService.GetDeckByID(playerDeckID)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to get player2 deck: %w", err)
+			}
 		}
-	}
 
 		session.SetPlayer2(playerID, playerDeck, sm.deckRepo)
+
+		// Redisにルーム参加を通知
+		if sm.redisClient != nil {
+			go func() {
+				sm.joinRoomInRedis(passcode, playerID)
+				sm.subscribeToRoom(passcode)
+				sm.publishMessage(passcode, RedisGameMessage{
+					Type:       "player_joined",
+					PlayerSlot: "player2",
+					UserID:     playerID,
+				})
+			}()
+		}
 
 		return passcode, false, nil
 	}
@@ -916,7 +1082,7 @@ func (sm *SessionManager) JoinRoomByPasscode(passcode, playerID, playerDeckID st
 func (sm *SessionManager) IsUserConnected(userID string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	
+
 	_, connected := sm.clients[userID]
 	return connected
-} 
+}

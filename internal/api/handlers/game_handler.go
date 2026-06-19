@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"   // Added for os.Getenv
@@ -400,10 +401,74 @@ func (h *GameHandler) JoinRoomByPasscode(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+const passcodeChars = "ABCDEFGHJKLMNPRSTUVWXYZ23456789"
+
+func generatePasscode() string {
+	b := make([]byte, 6)
+	for i := range b {
+		b[i] = passcodeChars[rand.Intn(len(passcodeChars))]
+	}
+	return string(b)
+}
+
+// CreateRoom はホストプレイヤーが新しいルームを作成するハンドラーです。
+// ランダムな6文字のパスコードを生成してセッションを作成し、パスコードを返します。
+func (h *GameHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
+	userID, err := ExtractUserIDFromContext(r)
+	if err != nil {
+		WriteErrorResponse(w, http.StatusUnauthorized, "認証情報が必要です")
+		return
+	}
+
+	var req struct {
+		DeckID string `json:"deck_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeckID == "" {
+		WriteErrorResponse(w, http.StatusBadRequest, "デッキIDが必要です")
+		return
+	}
+
+	// 衝突しないパスコードを最大5回生成
+	var passcode string
+	for i := 0; i < 5; i++ {
+		passcode = generatePasscode()
+		if _, exists := h.sessionManager.GetGameSession(passcode); !exists {
+			break
+		}
+	}
+
+	if err := h.sessionManager.CreateSessionForHost(passcode, userID, req.DeckID); err != nil {
+		log.Printf("[CreateRoom] failed to create session: %v", err)
+		WriteErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("ルーム作成に失敗しました: %v", err))
+		return
+	}
+
+	if err := h.sessionManager.CreateRoomInRedis(passcode, userID); err != nil {
+		log.Printf("[CreateRoom] Redis error (non-fatal): %v", err)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "GITRIS_ROOM_POD",
+		Value:    url.QueryEscape(passcode),
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: false,
+		SameSite: http.SameSiteNoneMode,
+		Secure:   true,
+	})
+
+	WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"passcode":   passcode,
+		"session_id": passcode,
+		"user_id":    userID,
+	})
+}
+
 // DeleteSession は指定された合言葉のセッションを削除するハンドラーです。
 func (h *GameHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[GameHandler] DeleteSession called")
-	
+
 	vars := mux.Vars(r)
 	passcode := vars["passcode"] // 合言葉をURLパラメータから取得
 	if passcode == "" {
@@ -412,14 +477,23 @@ func (h *GameHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[GameHandler] Deleting session with passcode: %s", passcode)
 
-	// セッションの存在を確認
 	_, exists := h.sessionManager.GetGameSession(passcode)
 	if !exists {
+		// ローカルにセッションがない場合、他ポッドへRedis pub/subで削除要求を発行
+		if h.sessionManager.DeleteSessionViaPubSub(passcode) {
+			log.Printf("[GameHandler] delete_session published via Redis for: %s", passcode)
+			WriteJSONResponse(w, http.StatusOK, map[string]interface{}{
+				"success": true,
+				"message": fmt.Sprintf("セッション「%s」を削除しました", passcode),
+			})
+			return
+		}
 		WriteErrorResponse(w, http.StatusNotFound, "指定された合言葉のセッションは見つかりませんでした")
 		return
 	}
 
-	// セッションを削除
+	// ローカルのセッションを削除し、他ポッドにも通知
+	h.sessionManager.DeleteSessionViaPubSub(passcode) // 他ポッドの部分セッションも削除
 	err := h.sessionManager.DeleteSession(passcode)
 	if err != nil {
 		log.Printf("[GameHandler] Failed to delete session %s: %v", passcode, err)

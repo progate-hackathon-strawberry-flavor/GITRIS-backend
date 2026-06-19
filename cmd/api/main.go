@@ -74,8 +74,21 @@ func main() {
 	// ゲーム結果関連の依存関係の初期化
 	resultRepo := database.NewResultRepository(databaseService.DB)
 
-	// テトリスゲームのセッションマネージャーを初期化
-	sessionManager := tetris.NewSessionManager(databaseService, deckRepo, resultRepo)
+	// Redis クライアントの初期化（REDIS_URL未設定の場合はnil、ローカル開発では動作継続）
+	redisURL := os.Getenv("REDIS_URL")
+	sessionManager := func() *tetris.SessionManager {
+		if redisURL != "" {
+			rc, err := tetris.NewRedisClient(redisURL)
+			if err != nil {
+				log.Printf("警告: Redisへの接続に失敗しました (シングルポッドモードで継続): %v", err)
+				return tetris.NewSessionManager(databaseService, deckRepo, resultRepo, nil)
+			}
+			log.Printf("Redisへの接続が確立されました: %s", redisURL)
+			return tetris.NewSessionManager(databaseService, deckRepo, resultRepo, rc)
+		}
+		log.Printf("REDIS_URL未設定: シングルポッドモードで起動します")
+		return tetris.NewSessionManager(databaseService, deckRepo, resultRepo, nil)
+	}()
 	// SessionManager.Run()はNewSessionManager内で既に開始されているため、重複実行を回避
 
 	// ハンドラ層の初期化
@@ -127,6 +140,9 @@ func main() {
 	gameRouter := r.PathPrefix("/api/game").Subrouter()
 	gameRouter.Use(auth.AuthMiddleware)
 	gameRouter.Use(auth.CORSHandler())
+
+	// ルーム作成（ホスト）
+	gameRouter.HandleFunc("/room/create", gameHandler.CreateRoom).Methods("POST", "OPTIONS")
 
 	// 合言葉ベースのマッチング・状態取得
 	gameRouter.HandleFunc("/room/passcode/{passcode}/join", gameHandler.JoinRoomByPasscode).Methods("POST", "OPTIONS")
