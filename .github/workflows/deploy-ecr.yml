@@ -53,36 +53,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          repositories: GITRIS-gitops
-
-      - name: Checkout gitops repo
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: progate-hackathon-strawberry-flavor/GITRIS-gitops
-          token: ${{ steps.app-token.outputs.token }}
-          path: gitops
-
-      - name: Update image tag
-        uses: mikefarah/yq@bbdd97482f2d439126582a59689eb1c855944955 # v4.44.3
-        with:
-          cmd: yq e '.tag = "sha-${{ github.sha }}"' -i gitops/chart/backend/values.yaml
-
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          path: gitops
-          branch: update-backend-${{ github.sha }}
-          commit-message: "chore: update backend image to sha-${{ github.sha }}"
-          title: "chore: update backend image to sha-${{ github.sha }}"
-          body: |
-            ## Summary
-            - ECR image: `${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}`
-            - Triggered by: ${{ github.repository }}@${{ github.ref_name }}
-          base: main
