@@ -200,6 +200,7 @@ func main() {
 	// シャットダウンシグナルを待機
 	<-quit
 	log.Println("サーバーをシャットダウンしています...")
+	log.Println("セッションマネージャーをシャットダウンしています...")
 
 	// SessionManagerを先にシャットダウン
 	sessionManager.Shutdown()
